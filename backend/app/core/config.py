@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 15
     bcrypt_rounds: int = 12
     cors_origins: str = "http://localhost:3000"
+    auto_seed: bool = False
 
 
 settings = Settings()
