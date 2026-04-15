@@ -42,7 +42,8 @@ npm run dev
 Frontend runs on `http://localhost:3000`.
 Backend runs on `http://localhost:8000`.
 
-Default seeded login:
+Set your own admin login credentials in `backend/.env` using:
 
-- Email: `admin@pharmacy.local`
-- Password: `SecurePass123!`
+- `SEED_ADMIN_EMAIL`
+- `SEED_ADMIN_PASSWORD`
+- `SEED_ADMIN_NAME`

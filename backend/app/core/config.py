@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     bcrypt_rounds: int = 12
     cors_origins: str = "http://localhost:3000"
     auto_seed: bool = False
+    seed_admin_name: str = "System Admin"
+    seed_admin_email: str = "admin@pharmacy.local"
+    seed_admin_password: str = "SecurePass123!"
 
 
 settings = Settings()

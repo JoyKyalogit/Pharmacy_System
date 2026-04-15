@@ -1,19 +1,35 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const API = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
 
-async function apiRequest(path, method, token, body) {
+async function apiRequest(path, method, token, body, extraHeaders = {}) {
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extraHeaders
     },
     body: body ? JSON.stringify(body) : undefined
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail || "Request failed");
+    const detail = data?.detail;
+    let errorMessage = "Request failed";
+    if (typeof detail === "string") {
+      errorMessage = detail;
+    } else if (Array.isArray(detail) && detail.length > 0) {
+      errorMessage = detail
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") return String(entry);
+          const pathText = Array.isArray(entry.loc) ? entry.loc.join(".") : "field";
+          return `${pathText}: ${entry.msg || "Invalid value"}`;
+        })
+        .join("; ");
+    } else if (detail && typeof detail === "object") {
+      errorMessage = JSON.stringify(detail);
+    }
+    throw new Error(errorMessage);
   }
   return res.json();
 }
@@ -22,8 +38,8 @@ export function App() {
   const [token, setToken] = useState("");
   const [user, setUser] = useState(null);
   const [activePage, setActivePage] = useState("stock");
-  const [email, setEmail] = useState("admin@pharmacy.local");
-  const [password, setPassword] = useState("SecurePass123!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [stock, setStock] = useState([]);
   const [appMessage, setAppMessage] = useState("");
   const [isSubmittingDrug, setIsSubmittingDrug] = useState(false);
@@ -57,6 +73,10 @@ export function App() {
   const [selectedDrug, setSelectedDrug] = useState(null);
   const [cart, setCart] = useState([]);
   const [stockSearch, setStockSearch] = useState("");
+  const [isSearchingDrugs, setIsSearchingDrugs] = useState(false);
+  const [searchNonce, setSearchNonce] = useState(0);
+  const saleSearchInputRef = useRef(null);
+  const saleQtyInputRef = useRef(null);
 
   const canUseApp = useMemo(() => Boolean(token), [token]);
 
@@ -67,6 +87,10 @@ export function App() {
   }, [appMessage]);
 
   const login = async () => {
+    if (!email.trim() || !password.trim()) {
+      setAppMessage("Enter both email and password.");
+      return;
+    }
     try {
       const data = await apiRequest("/auth/login", "POST", null, { email, password });
       setToken(data.access_token);
@@ -160,6 +184,7 @@ export function App() {
   };
 
   const submitSale = async () => {
+    if (isSubmittingSale) return;
     setIsSubmittingSale(true);
     try {
       if (cart.length === 0) {
@@ -180,17 +205,32 @@ export function App() {
           discount: 0
         }))
       };
-      const result = await apiRequest("/sales", "POST", token, payload);
+      const result = await apiRequest("/sales", "POST", token, payload, {
+        "Idempotency-Key": `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      });
       setAppMessage(
         `Sale created: ${result.receipt_no} (Total: ${result.grand_total}) | KRA PIN: ${result.kra_pin || "N/A"} | ETR: ${
           result.etr_serial || "N/A"
         } | ETR Status: ${result.etr_status || "PENDING"}`
       );
+      setStock((prevStock) =>
+        prevStock.map((stockLine) => {
+          const soldLine = cart.find((c) => Number(c.drug_id) === Number(stockLine.drug_id));
+          if (!soldLine) return stockLine;
+          return {
+            ...stockLine,
+            total_quantity: Math.max(0, Number(stockLine.total_quantity || 0) - Number(soldLine.quantity || 0))
+          };
+        })
+      );
       setCart([]);
       setSelectedDrug(null);
       setDrugSearch("");
       setSearchResults([]);
-      await loadStock();
+      setSearchNonce((v) => v + 1);
+      if (saleSearchInputRef.current) {
+        saleSearchInputRef.current.focus();
+      }
     } catch (err) {
       setAppMessage(`Sale failed: ${err.message}`);
     } finally {
@@ -206,26 +246,48 @@ export function App() {
       return [];
     }
     try {
+      setIsSearchingDrugs(true);
       const data = await apiRequest(`/drugs/search?q=${encodeURIComponent(term)}`, "GET", token);
       setSearchResults(data);
       return data;
     } catch (err) {
       setAppMessage(`Search failed: ${err.message}`);
       return [];
+    } finally {
+      setIsSearchingDrugs(false);
     }
   };
 
-  const handleDrugSearchChange = async (value) => {
+  const handleDrugSearchChange = (value) => {
     setDrugSearch(value);
-    const data = await searchDrugs(value);
-    const results = data || [];
-    const exactMatch = results.find((item) => item.drug_name.toLowerCase() === value.trim().toLowerCase());
+    if (!value.trim()) {
+      setSelectedDrug(null);
+      setSearchResults([]);
+    }
+  };
+
+  const selectExactMatch = (results, term) => {
+    const exactMatch = (results || []).find((item) => item.drug_name.toLowerCase() === term.trim().toLowerCase());
     if (exactMatch) {
       setSelectedDrug(exactMatch);
       setDrugSearch(exactMatch.drug_name);
       setSearchResults([]);
     }
+    return exactMatch;
   };
+
+  useEffect(() => {
+    if (!token || activePage !== "sales") return undefined;
+    const term = drugSearch.trim();
+    if (!term) return undefined;
+    if (selectedDrug && selectedDrug.drug_name.toLowerCase() === term.toLowerCase()) return undefined;
+
+    const timer = setTimeout(async () => {
+      const data = await searchDrugs(term);
+      selectExactMatch(data, term);
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [drugSearch, token, activePage, selectedDrug, searchNonce]);
 
   const loadSalesToday = async () => {
     try {
@@ -351,10 +413,19 @@ export function App() {
     setSaleForm((prev) => ({ ...prev, quantity: 1, quantity_unit: "base" }));
     setSelectedDrug(null);
     setDrugSearch("");
+    setSearchResults([]);
+    if (saleSearchInputRef.current) {
+      saleSearchInputRef.current.focus();
+    }
   };
 
   const removeCartLine = (drugId) => {
     setCart((prev) => prev.filter((item) => item.drug_id !== drugId));
+  };
+
+  const clearCart = () => {
+    setCart([]);
+    setAppMessage("Cart cleared.");
   };
 
   const saleGrandTotal = cart.reduce((sum, line) => sum + Number(line.line_total || 0), 0);
@@ -604,9 +675,28 @@ export function App() {
                   placeholder="Search a medicine"
                   value={drugSearch}
                   list="medicine-options"
+                  ref={saleSearchInputRef}
                   onChange={(e) => {
                     const value = e.target.value;
                     handleDrugSearchChange(value);
+                  }}
+                  onKeyDown={async (e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    if (selectedDrug) {
+                      saleQtyInputRef.current?.focus();
+                      return;
+                    }
+                    const data = await searchDrugs(drugSearch);
+                    const exact = selectExactMatch(data, drugSearch);
+                    if (exact) {
+                      saleQtyInputRef.current?.focus();
+                    } else if ((data || []).length === 1) {
+                      pickDrug(data[0]);
+                      saleQtyInputRef.current?.focus();
+                    } else {
+                      setAppMessage("Choose a medicine from suggestions.");
+                    }
                   }}
                 />
                 <datalist id="medicine-options">
@@ -617,8 +707,15 @@ export function App() {
                 <input
                   placeholder="Quantity"
                   type="number"
+                  ref={saleQtyInputRef}
                   value={saleForm.quantity}
                   onChange={(e) => setSaleForm({ ...saleForm, quantity: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCartLine();
+                    }
+                  }}
                 />
                 <select value={saleForm.quantity_unit} onChange={(e) => setSaleForm({ ...saleForm, quantity_unit: e.target.value })} disabled={!selectedDrug}>
                   <option value="base">{selectedDrug ? `${selectedDrug.unit} (base unit)` : "Base unit"}</option>
@@ -640,6 +737,11 @@ export function App() {
                   </p>
                 ) : null}
               </div>
+              <p className="sales-helper-text">
+                {isSearchingDrugs
+                  ? "Searching medicines..."
+                  : "Fast checkout: type medicine name, press Enter, type quantity, then Enter to add."}
+              </p>
               <button onClick={addCartLine}>Add to Cart</button>
               <h3>Cart</h3>
               <table>
@@ -669,6 +771,9 @@ export function App() {
               <p>
                 <strong>Grand Total:</strong> {saleGrandTotal.toFixed(2)}
               </p>
+              <button type="button" onClick={clearCart} disabled={cart.length === 0 || isSubmittingSale}>
+                Clear Cart
+              </button>
               <button onClick={submitSale} disabled={isSubmittingSale}>
                 {isSubmittingSale ? "Processing..." : "Finalize Sale"}
               </button>

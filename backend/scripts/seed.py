@@ -12,6 +12,7 @@ if backend_root not in sys.path:
 # endregion
 
 from app.core.database import Base, SessionLocal, engine
+from app.core.config import settings
 from app.core.security import hash_password
 from app.models import Role, User
 
@@ -55,17 +56,26 @@ def run():
         db.commit()
 
         admin_role = db.scalar(select(Role).where(Role.name == "Admin"))
-        admin = db.scalar(select(User).where(User.email == "admin@pharmacy.local"))
+        admin_email = settings.seed_admin_email.strip().lower()
+        admin_password = settings.seed_admin_password
+        admin_name = settings.seed_admin_name.strip() or "System Admin"
+        admin = db.scalar(select(User).where(User.email == admin_email))
         if not admin:
             db.add(
                 User(
                     role_id=admin_role.id,
-                    full_name="System Admin",
-                    email="admin@pharmacy.local",
-                    password_hash=hash_password("SecurePass123!"),
+                    full_name=admin_name,
+                    email=admin_email,
+                    password_hash=hash_password(admin_password),
                     is_active=True,
                 )
             )
+            db.commit()
+        else:
+            admin.full_name = admin_name
+            admin.password_hash = hash_password(admin_password)
+            admin.role_id = admin_role.id
+            admin.is_active = True
             db.commit()
         print("Seed completed.")
     finally:

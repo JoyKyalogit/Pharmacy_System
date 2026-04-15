@@ -220,6 +220,12 @@ button:disabled {
   gap: 8px;
 }
 
+.sales-helper-text {
+  margin: 8px 0 4px;
+  color: #334155;
+  font-size: 13px;
+}
+
 .action-buttons {
   display: flex;
   gap: 8px;
