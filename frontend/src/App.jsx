@@ -187,6 +187,8 @@ export function App() {
     phone: ""
   });
   const [pinResets, setPinResets] = useState({});
+  const [nameEdits, setNameEdits] = useState({});
+  const [savingNameUserId, setSavingNameUserId] = useState(null);
   const [medicineForm, setMedicineForm] = useState({
     name: "",
     batch_no: "",
@@ -457,6 +459,29 @@ export function App() {
       await loadDeskStaff();
     } catch (err) {
       setAppMessage(`PIN update failed: ${err.message}`);
+    }
+  };
+
+  const updateUserName = async (userId, currentName) => {
+    const nextName = (nameEdits[userId] ?? currentName ?? "").trim();
+    if (nextName.length < 2) {
+      setAppMessage("Name must be at least 2 characters.");
+      return;
+    }
+    if (nextName === currentName) {
+      setAppMessage("Name is already up to date.");
+      return;
+    }
+    try {
+      setSavingNameUserId(userId);
+      await apiRequest(`/users/${userId}`, "PUT", token, { full_name: nextName });
+      setAppMessage("Name updated.");
+      await loadUsers();
+      await loadDeskStaff();
+    } catch (err) {
+      setAppMessage(`Name update failed: ${err.message}`);
+    } finally {
+      setSavingNameUserId(null);
     }
   };
 
@@ -1530,10 +1555,19 @@ export function App() {
                   Back to stock
                 </button>
                 <p className="sales-helper-text">Add a user.</p>
-                <div className="grid">
+                <form
+                  className="grid pharmacist-add-form"
+                  autoComplete="off"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    createUser();
+                  }}
+                >
                   <label>
                     Full name
                     <input
+                      name="pharmacy-staff-full-name"
+                      autoComplete="off"
                       value={userForm.full_name}
                       onChange={(e) => setUserForm({ ...userForm, full_name: e.target.value })}
                     />
@@ -1541,8 +1575,10 @@ export function App() {
                   <label>
                     PIN
                     <input
+                      name="pharmacy-staff-new-pin"
                       type="password"
                       inputMode="numeric"
+                      autoComplete="new-password"
                       placeholder="4 characters"
                       value={userForm.password}
                       onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
@@ -1550,7 +1586,12 @@ export function App() {
                   </label>
                   <label>
                     Role
-                    <select value={userForm.role} onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}>
+                    <select
+                      name="pharmacy-staff-role"
+                      autoComplete="off"
+                      value={userForm.role}
+                      onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
+                    >
                       <option value="Pharmacist">Pharmacist</option>
                       <option value="Cashier">Cashier</option>
                       <option value="Admin">Admin</option>
@@ -1559,14 +1600,16 @@ export function App() {
                   <label>
                     Phone (optional)
                     <input
+                      name="pharmacy-staff-phone"
+                      autoComplete="off"
                       value={userForm.phone}
                       onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })}
                     />
                   </label>
-                </div>
-                <button type="button" onClick={createUser} disabled={isSubmittingUser}>
-                  {isSubmittingUser ? "Saving..." : "Add user"}
-                </button>
+                  <button type="submit" disabled={isSubmittingUser}>
+                    {isSubmittingUser ? "Saving..." : "Add user"}
+                  </button>
+                </form>
                 <h3>Accounts</h3>
                 <table>
                   <thead>
@@ -1580,13 +1623,30 @@ export function App() {
                   <tbody>
                     {users.map((u) => (
                       <tr key={u.id}>
-                        <td>{u.full_name}</td>
+                        <td>
+                          <div className="action-buttons">
+                            <input
+                              value={nameEdits[u.id] ?? u.full_name}
+                              onChange={(e) => setNameEdits({ ...nameEdits, [u.id]: e.target.value })}
+                              placeholder="Full name"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => updateUserName(u.id, u.full_name)}
+                              disabled={savingNameUserId === u.id}
+                            >
+                              {savingNameUserId === u.id ? "Saving..." : "Save name"}
+                            </button>
+                          </div>
+                        </td>
                         <td>{u.role}</td>
                         <td>
                           <div className="action-buttons">
                             <input
                               type="password"
                               inputMode="numeric"
+                              autoComplete="new-password"
+                              name={`pharmacy-staff-reset-pin-${u.id}`}
                               placeholder="4 characters"
                               value={pinResets[u.id] || ""}
                               onChange={(e) => setPinResets({ ...pinResets, [u.id]: e.target.value })}
