@@ -1,13 +1,25 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import Base, engine
+from app.core.security_checks import enforce_security_settings
 from app.routers import router
 from scripts.seed import run as run_seed
 
-app = FastAPI(title=settings.app_name)
+logging.basicConfig(level=logging.INFO)
+enforce_security_settings(settings)
+
+_docs_enabled = settings.app_env.lower() != "production"
+app = FastAPI(
+    title=settings.app_name,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
+)
 
 app.add_middleware(
     CORSMiddleware,

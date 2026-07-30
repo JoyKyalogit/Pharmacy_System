@@ -1,108 +1,74 @@
 # Feature Breakdown
 
-## 1) Stock Management
+## 1) Stock management
 
-### Drug Catalog
+### Stock view
 
-- Create and maintain medicine records with SKU, category, and unit
-- Mark items as prescription-required where applicable
-- Set reorder levels for low-stock detection
+- List medicines with available quantity, batch number, expiry, and status (low / near expiry / expired)
+- KPI cards: medicine count, total units, alerts
+- Search and refresh
 
-### Batch Tracking
+### Add medicine (batch intake)
 
-- Receive stock by batch number and supplier
-- Store unit cost, selling price, and expiry date per batch
-- Support traceability for recalls and compliance checks
-
-### Inventory Control
-
-- Real-time available quantity per drug
-- Automatic deduction when sale is completed
-- Low stock alerts based on configurable reorder threshold
-- Expiry alerts for near-expiry batches
+- Medicine name and batch number
+- Number of packets; optional tablets per packet (bottles if left empty)
+- Price per tablet and/or price per packet/bottle
+- Expiry date
+- Creates drug (if needed) and initial batch; stock derived from packet counts
 
 ---
 
-## 2) POS System
+## 2) Sales (POS)
 
-### Fast Checkout
+### Checkout flow
 
-- Search drugs by name/SKU
-- Add multiple items to a cart
-- Compute totals, discounts, and final amount
+- Search by medicine name or batch number
+- Dropdown shows batches sorted by **nearest expiry first** (FEFO)
+- Select batch, quantity (base unit or pack where applicable), add to cart
+- Finalize sale — stock deducted from selected batch
+- Sales are stored as OTC / CASH by default in the UI (backend supports other types for future use)
 
-### Sale Types
+### Cart
 
-- **OTC sales:** standard walk-in purchases
-- **Prescription sales:** requires prescription metadata and validation
-
-### Payment Methods
-
-- Cash
-- M-Pesa
-- Card
-
-### Receipt Handling
-
-- Generate unique receipt numbers
-- Return printable sale details after checkout
-- Persist full sale and item-level line details
+- Line items with batch, expiry, quantity, price, line total
+- Clear cart and finalize sale
 
 ---
 
-## 3) Reporting and Analytics
+## 3) Reporting (admin only)
 
-### Sales Reporting
-
-- Daily and monthly sales trends
-- Sales count and gross revenue
-- Cashier performance summaries
-
-### Profit Reporting
-
-- Gross profit calculations based on batch cost vs sale price
-- Product and category profitability insights
-
-### Inventory Reporting
-
-- Current stock on hand
-- Low-stock list for replenishment planning
-- Expiry reports by date window
+- **Today**, **by month**, or **custom date range**
+- Daily totals breakdown for ranges
+- Medicines sold with quantities and amounts
+- Requires admin email/password (not the desk PIN)
 
 ---
 
-## 4) Alerts and Monitoring
+## 4) Access control
 
-### Low Stock Alerts
+### Desk PIN
 
-- Trigger when quantity falls below reorder level
-- Visible in dashboard and inventory module
+- Single shared PIN configured in `backend/.env` (`KIOSK_PIN`)
+- Unlocks Stock, Add medicine, and Sales
+- **Lock desk** ends the session
 
-### Expiry Alerts
+### Admin
 
-- Highlight batches nearing expiry within configurable days
-- Helps reduce waste and enforce FEFO dispensing
-
-### Operational Traceability
-
-- Audit logs for major actions and exceptions
-- Supports supervision, compliance, and incident review
+- Separate credentials for reports only
+- Seeded via `SEED_ADMIN_*` environment variables
 
 ---
 
-## 5) Access Control and Governance
+## 5) Alerts
 
-- JWT-based authenticated sessions
-- Role-based authorization by endpoint
-- Least-privilege defaults for non-admin roles
-- Action history maintained via audit logs
+- Low stock (at or below reorder level)
+- Near expiry and expired batches on the stock screen
 
 ---
 
-## 6) Extensibility Roadmap (Optional)
+## 6) Optional / roadmap
 
-- Supplier purchase order workflow
-- Multi-branch inventory support
-- Barcode scanner and label printing integration
-- Electronic prescription integrations
-- Notification channels (SMS/email/WhatsApp) for alerts
+- Per-staff logins and cashier role in the UI
+- Payment method and prescription fields in the sales screen
+- Supplier purchase orders and multi-branch support
+- Barcode scanning and receipt printing

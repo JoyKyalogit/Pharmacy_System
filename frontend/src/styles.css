@@ -1,30 +1,32 @@
 body {
   margin: 0;
   font-family: "Inter", "Segoe UI", Arial, sans-serif;
+  font-size: 17px;
+  line-height: 1.5;
   background: linear-gradient(180deg, #d6d9df 0%, #e5e7eb 45%, #f1f3f5 100%);
   color: #0f172a;
 }
 
 .container {
-  max-width: 1280px;
+  max-width: 1400px;
   margin: 20px auto;
   padding: 0 18px 20px;
 }
 
 h1 {
   margin: 0 0 14px;
-  font-size: 30px;
+  font-size: 34px;
   letter-spacing: -0.4px;
 }
 
 h2 {
   margin: 0 0 12px;
-  font-size: 22px;
+  font-size: 26px;
 }
 
 h3 {
   margin: 0 0 10px;
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .card {
@@ -32,7 +34,7 @@ h3 {
   border: 1px solid #e2e8f0;
   border-radius: 14px;
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
-  padding: 18px;
+  padding: 22px;
   margin-bottom: 18px;
 }
 
@@ -41,10 +43,10 @@ select,
 button {
   display: block;
   margin: 8px 0;
-  padding: 11px 12px;
+  padding: 13px 14px;
   border-radius: 10px;
   border: 1px solid #cbd5e1;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 button {
@@ -104,7 +106,7 @@ button:disabled {
 .top-nav-brand h3 {
   margin: 0;
   line-height: 1.2;
-  font-size: 30px;
+  font-size: 32px;
 }
 
 .sidebar h2 {
@@ -128,6 +130,22 @@ button:disabled {
   margin: 2px 0 0;
 }
 
+.session-user-badge {
+  display: flex;
+  align-items: center;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #0f172a;
+  border: 1px solid #334155;
+}
+
+.session-user-name {
+  color: #f8fafc;
+  font-size: 16px;
+  font-weight: 600;
+}
+
 .sidebar .tabs button {
   width: auto;
   text-align: left;
@@ -138,8 +156,8 @@ button:disabled {
   justify-content: center;
   border-radius: 12px;
   margin: 0;
-  padding: 12px 18px;
-  font-size: 16px;
+  padding: 14px 20px;
+  font-size: 17px;
 }
 
 .sidebar .tabs button.active-tab {
@@ -180,6 +198,10 @@ button:disabled {
   margin-bottom: 18px;
 }
 
+.kpi-grid-stock {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .kpi-card {
   background: #ffffff;
   border: 1px solid #dbe5f3;
@@ -191,15 +213,125 @@ button:disabled {
 .kpi-label {
   margin: 0;
   color: #64748b;
-  font-size: 12px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
 }
 
 .kpi-card h3 {
   margin: 6px 0 0;
-  font-size: 24px;
+  font-size: 28px;
   color: #0f172a;
+}
+
+.kpi-detail {
+  margin: 8px 0 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.kpi-detail-muted {
+  color: #64748b;
+}
+
+.kpi-card-alert {
+  background: #fff7e8;
+  border-color: #f7b955;
+}
+
+.kpi-card-expired {
+  background: #fef2f2;
+  border-color: #f87171;
+}
+
+.kpi-card-expiry {
+  background: #fff4e6;
+  border-color: #fb923c;
+}
+
+.kpi-card-wide {
+  grid-column: 1 / -1;
+}
+
+.stock-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.stock-toolbar h2 {
+  margin: 0;
+}
+
+.stock-toolbar button {
+  margin: 0;
+}
+
+.sale-search-wrap {
+  position: relative;
+  grid-column: 1 / -1;
+}
+
+.sale-search-wrap input {
+  width: 100%;
+  margin: 0;
+}
+
+.sale-search-dropdown {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.sale-search-option {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  text-align: left;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-weight: 400;
+  font-size: 16px;
+}
+
+.sale-search-option:hover {
+  background: #f1f5f9;
+  filter: none;
+}
+
+.sale-search-option-first {
+  background: #fff7ed;
+  border-color: #fdba74;
+}
+
+.sale-search-option-title {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.sale-search-option-meta {
+  display: block;
+  font-size: 14px;
+  color: #475569;
+  line-height: 1.4;
 }
 
 .active-tab {
@@ -223,7 +355,23 @@ button:disabled {
 .sales-helper-text {
   margin: 8px 0 4px;
   color: #334155;
-  font-size: 13px;
+  font-size: 15px;
+}
+
+.cash-calculator {
+  margin: 12px 0;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.cash-calculator p {
+  margin: 4px 0;
+}
+
+.sale-totals-grid {
+  margin-top: 12px;
 }
 
 .action-buttons {
@@ -242,18 +390,49 @@ button:disabled {
   border-color: #f7b955;
 }
 
+.alert-card-expiry {
+  background: #fff4e6;
+  border-color: #fb923c;
+}
+
+.alert-card-expired {
+  background: #fef2f2;
+  border-color: #f87171;
+}
+
+.row-near-expiry td {
+  background: #fff7ed;
+}
+
+.expiry-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9a3412;
+  background: #ffedd5;
+}
+
+.expiry-badge.expired {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
   overflow: hidden;
   border-radius: 10px;
   margin-top: 8px;
+  font-size: 15px;
 }
 
 th,
 td {
   border: 1px solid #e5e7eb;
-  padding: 10px;
+  padding: 12px 14px;
   text-align: left;
 }
 
@@ -261,6 +440,12 @@ th {
   background: #f8fafc;
   color: #334155;
   font-weight: 700;
+  font-size: 15px;
+}
+
+tfoot td {
+  background: #f1f5f9;
+  font-weight: 600;
 }
 
 tr:nth-child(even) td {
@@ -268,7 +453,7 @@ tr:nth-child(even) td {
 }
 
 label {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   color: #334155;
 }
@@ -294,6 +479,165 @@ label {
 .status-chip.good {
   background: #dcfce7;
   color: #166534;
+}
+
+.nav-reports-admin {
+  margin-left: auto;
+}
+
+.admin-login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.admin-login-modal {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-login-modal .action-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.desk-login-card {
+  max-width: 420px;
+  margin: 48px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.desk-login-error {
+  color: #b91c1c;
+  margin: 0;
+}
+
+.report-empty {
+  margin: 16px 0 0;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.receipt-panel {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.receipt-preview {
+  max-width: 360px;
+  margin: 12px 0;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.receipt-preview-title {
+  margin: 0 0 4px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.receipt-preview-meta {
+  margin: 0 0 10px;
+  text-align: center;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.receipt-preview-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.receipt-preview-lines li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px dotted #e2e8f0;
+}
+
+.receipt-preview-total {
+  margin: 10px 0 0;
+  font-weight: 700;
+  text-align: right;
+}
+
+.receipt-panel .action-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.receipt-step-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.receipt-step-modal {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.receipt-step-modal .action-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.nav-lock-desk,
+.nav-change-password {
+  margin-left: 8px;
+  font-size: 16px;
+}
+
+@media (min-width: 1200px) {
+  body {
+    font-size: 18px;
+  }
+
+  input,
+  select,
+  button {
+    font-size: 17px;
+    padding: 14px 16px;
+  }
+
+  table,
+  th {
+    font-size: 16px;
+  }
+
+  label {
+    font-size: 16px;
+  }
+
+  .sidebar .tabs button {
+    font-size: 18px;
+    padding: 15px 22px;
+  }
 }
 
 @media (max-width: 980px) {

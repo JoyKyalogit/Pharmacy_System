@@ -76,7 +76,28 @@ def run():
             admin.password_hash = hash_password(admin_password)
             admin.role_id = admin_role.id
             admin.is_active = True
-            db.commit()
+
+        pharmacist_role = db.scalar(select(Role).where(Role.name == "Pharmacist"))
+        staff_email = settings.seed_staff_email.strip().lower()
+        staff_password = settings.seed_staff_password
+        staff_name = settings.seed_staff_name.strip() or "Pharmacy Staff"
+        staff = db.scalar(select(User).where(User.email == staff_email))
+        if not staff:
+            db.add(
+                User(
+                    role_id=pharmacist_role.id,
+                    full_name=staff_name,
+                    email=staff_email,
+                    password_hash=hash_password(staff_password),
+                    is_active=True,
+                )
+            )
+        else:
+            staff.full_name = staff_name
+            staff.password_hash = hash_password(staff_password)
+            staff.role_id = pharmacist_role.id
+            staff.is_active = True
+        db.commit()
         print("Seed completed.")
     finally:
         db.close()

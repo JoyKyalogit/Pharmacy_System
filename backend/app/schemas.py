@@ -3,8 +3,22 @@ from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
-    email: str = Field(..., min_length=3)
-    password: str
+    email: str = Field(..., min_length=3, max_length=254)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class DeskLoginRequest(BaseModel):
+    pin: str = Field(..., min_length=8, max_length=64)
+
+
+class StaffPinLoginRequest(BaseModel):
+    user_id: int
+    pin: str = Field(..., min_length=4, max_length=128)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=4, max_length=128)
 
 
 class TokenResponse(BaseModel):
@@ -45,8 +59,17 @@ class BatchCreate(BaseModel):
     selling_price: float = Field(..., ge=0)
 
 
+class BatchUpdate(BaseModel):
+    batch_no: str | None = None
+    expiry_date: date | None = None
+    quantity_available: int | None = Field(None, ge=0)
+    unit_cost: float | None = Field(None, ge=0)
+    selling_price: float | None = Field(None, ge=0)
+
+
 class SaleItemIn(BaseModel):
     drug_id: int
+    batch_id: int | None = None
     quantity: int = Field(..., gt=0)
     unit_price: float = Field(..., ge=0)
     discount: float = Field(0, ge=0)
@@ -74,3 +97,19 @@ class SaleCreateResponse(BaseModel):
     etr_serial: str | None = None
     etr_status: str
     created_at: datetime
+
+
+class UserCreate(BaseModel):
+    full_name: str = Field(..., min_length=2, max_length=150)
+    email: str = Field(..., min_length=3, max_length=150)
+    password: str = Field(..., min_length=4, max_length=128)
+    role: str = Field(..., pattern="^(Admin|Pharmacist|Cashier)$")
+    phone: str | None = Field(None, max_length=30)
+
+
+class UserUpdate(BaseModel):
+    full_name: str | None = Field(None, min_length=2, max_length=150)
+    password: str | None = Field(None, min_length=4, max_length=128)
+    role: str | None = Field(None, pattern="^(Admin|Pharmacist|Cashier)$")
+    phone: str | None = Field(None, max_length=30)
+    is_active: bool | None = None

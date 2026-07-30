@@ -1,77 +1,55 @@
 # Roles and Permissions
 
-## Role Definitions
+## UI access (what staff see)
 
-## Admin
+| Screen | Desk PIN session | Admin session (reports) |
+|--------|------------------|-------------------------|
+| Stock | Yes | Yes (after exiting reports or via nav) |
+| Add medicine | Yes | Yes |
+| Sales | Yes | Yes |
+| Reports | No — admin login required | Yes |
+| Lock desk | Yes | Yes (clears session, returns to PIN) |
 
-Primary system owner and supervisor. Has full access to configuration, users, inventory, sales, and reports.
+There is **no per-user login** at the counter. Everyone shares the desk PIN for daily work.
 
-## Pharmacist
+## Role definitions
 
-Clinical and stock operations role. Manages medicines, prescription workflows, and most reports.
+### Admin
 
-## Cashier
+System owner. Full API access including **all report endpoints**. Used only through **Reports (Admin)** in the UI (email + password).
 
-Front-desk sales role focused on POS transactions and receipt handling with restricted administrative access.
+### Pharmacist
+
+Used as the **desk session** identity after a successful desk PIN. Can manage drugs/stock and process sales in the current app.
+
+### Cashier
+
+Defined in the database for future use. The desk PIN currently signs in as the seeded **Pharmacist** staff user.
 
 ---
 
-## Permission Matrix
+## API permission summary (current routes)
 
 | Capability | Admin | Pharmacist | Cashier |
 |---|---:|---:|---:|
-| View dashboard | Yes | Yes | Yes |
-| Manage users | Yes | No | No |
-| Assign/change roles | Yes | No | No |
-| Create/update drugs | Yes | Yes | No |
-| Receive stock batches | Yes | Yes | No |
-| Adjust stock manually | Yes | Yes (limited) | No |
-| Process OTC sales | Yes | Yes | Yes |
-| Process prescription sales | Yes | Yes | Policy-based |
-| Void/refund sales | Yes | Yes (limited) | No |
-| View sales reports | Yes | Yes | Limited |
-| View profit reports | Yes | Yes | No |
-| View audit logs | Yes | Limited | No |
-| Configure system settings | Yes | No | No |
+| Desk login → staff JWT | — | (staff user) | — |
+| View stock levels | Yes | Yes | Yes |
+| Create drug / receive batch | Yes | Yes | No |
+| Search batches (POS) | Yes | Yes | Yes |
+| Create sale | Yes | Yes | Yes |
+| Sales reports (`/reports/*`) | Yes | No | No |
+| Low-stock report | Yes | No | No |
 
 ---
 
-## Endpoint Access Principles
+## Endpoint access principles
 
 - Backend enforces role checks on every protected route.
-- Frontend only hides disallowed actions for usability; it does not replace backend authorization.
-- Critical mutations require explicit permission checks and dual-control policy for high-risk actions.
+- Frontend navigation and modals are for usability only; they do not replace server authorization.
+- Changing `KIOSK_PIN` does not require re-running seed; changing `SEED_STAFF_*` requires `scripts/seed.py`.
 
-## Permission Keys (Recommended)
+## Audit and accountability
 
-- `users.manage`
-- `roles.assign`
-- `drugs.manage`
-- `stock.receive`
-- `stock.adjust`
-- `sale.create.otc`
-- `sale.create.prescription`
-- `sale.void`
-- `sale.refund`
-- `reports.sales.view`
-- `reports.profit.view`
-- `audit_logs.view`
-
-## Recommended Restrictions
-
-- Cashier cannot:
-  - Manage users or roles
-  - Receive or adjust stock
-  - Access profit and audit reports
-  - Void or refund completed sales
-- Pharmacist can:
-  - Manage stock and prescription sales
-  - Access inventory/expiry/sales reports
-  - Not manage users or global settings
-- Admin can perform all actions, including overrides with audit justification.
-
-## Audit and Accountability
-
-- All role-sensitive actions are logged with user identity and timestamp.
-- Permission denied attempts should be captured for security monitoring.
-- Void/refund and manual stock adjustments must include reason codes and supervisor reference where required.
+- Desk and admin sign-in events are logged where implemented.
+- Sales are attributed to the authenticated user (desk session = staff user).
+- A shared desk PIN does not identify which person made a sale; use operational procedures if you need per-person accountability later.

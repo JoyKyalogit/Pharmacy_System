@@ -24,10 +24,31 @@ Auth: `Authorization: Bearer <JWT>`
 
 ## Authentication
 
-### Login
+### Desk login (staff — primary UI flow)
+
+- **Route:** `/auth/desk-login`
+- **Method:** `POST`
+- **Auth:** None
+- **Request Body:**
+
+```json
+{
+  "pin": "YourDeskPIN"
+}
+```
+
+- **Response (200):** Same shape as `/auth/login`, with `user.role` typically `Pharmacist` (staff seed user).
+- **Errors:**
+  - `401` — incorrect PIN
+  - `503` — `KIOSK_PIN` not set on server, or staff user missing (run `scripts/seed.py`)
+
+The frontend stores the returned JWT in `sessionStorage` until **Lock desk** or the tab session ends.
+
+### Login (admin — reports)
 
 - **Route:** `/auth/login`
 - **Method:** `POST`
+- **Auth:** None
 - **Request Body:**
 
 ```json
@@ -43,7 +64,7 @@ Auth: `Authorization: Bearer <JWT>`
 {
   "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "token_type": "bearer",
-  "expires_in": 3600,
+  "expires_in": 900,
   "user": {
     "id": 1,
     "name": "System Admin",
@@ -53,13 +74,7 @@ Auth: `Authorization: Bearer <JWT>`
 }
 ```
 
-### Refresh Token (Optional)
-
-- **Route:** `/auth/refresh`
-- **Method:** `POST`
-- **Request Body:** `{ "refresh_token": "<token>" }`
-- **Response (200):** New access token payload
-- **Notes:** Refresh token should rotate on every successful refresh.
+Used by the **Reports (Admin)** modal. Report endpoints require `Admin` role regardless of UI.
 
 ---
 

@@ -12,10 +12,10 @@ This separation keeps the UI responsive, centralizes core logic on the server, a
 
 ## Components
 
-### Frontend (React)
+### Frontend (React + Vite)
 
-- Provides login, stock, POS, reporting, and admin screens
-- Stores short-lived access token in memory (or secure client store)
+- Desk PIN gate, then Stock, Add medicine, Sales, and admin-only Reports
+- Stores JWT in React state and `sessionStorage` until Lock desk
 - Sends authenticated requests to FastAPI using bearer JWT
 - Handles form validation and user-friendly error states
 
@@ -38,12 +38,13 @@ This separation keeps the UI responsive, centralizes core logic on the server, a
 
 ## Data Flow
 
-1. User authenticates via frontend login.
-2. FastAPI verifies credentials and returns JWT.
-3. Frontend sends JWT with each protected request.
-4. Backend validates token, role, and payload.
-5. Backend updates/reads PostgreSQL inside transactions.
-6. Backend returns JSON responses to frontend for rendering.
+1. Staff enter desk PIN; frontend calls `POST /auth/desk-login`.
+2. FastAPI verifies PIN against `KIOSK_PIN` and returns a staff (Pharmacist) JWT.
+3. For reports, admin email/password via `POST /auth/login` (Admin role required on report routes).
+4. Frontend sends JWT with each protected request.
+5. Backend validates token, role, and payload.
+6. Backend updates/reads PostgreSQL inside transactions.
+7. Backend returns JSON responses to the UI.
 
 ## Architecture Diagram (Text)
 

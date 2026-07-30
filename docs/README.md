@@ -1,54 +1,54 @@
-# Pharmacy Stock Management and POS System
+# Lindah Pharmacy Management System
 
 ## Overview
 
-This project is a pharmacy operations platform that combines stock management and point-of-sale (POS) in one system. It supports batch-level inventory control, expiry tracking, OTC and prescription sales, multi-method payments, and role-based workflows for Admin, Pharmacist, and Cashier users.
+A pharmacy operations app for **one location on a local network**: stock viewing, receiving medicine (batch intake), point-of-sale sales, and admin-only sales reports. Designed for counter use without per-staff logins — staff share a **desk PIN**; the owner uses a separate **admin account** for reports.
 
-## Core Capabilities
+## Core capabilities
 
-- Batch-based stock intake with supplier linkage, cost/price control, and expiry dates
-- POS checkout flow for OTC and prescription transactions
-- Payment support for Cash, M-Pesa, and Card
-- Real-time stock deduction and low-stock/expiry alerts
-- Sales, profit, and inventory reporting dashboards
-- Audit logs for sensitive actions and operational traceability
+- **Stock** — medicines on hand, batch numbers, expiry and low-stock indicators
+- **Add medicine** — batch intake with packets/tablets or bottles, pricing, expiry
+- **Sales** — batch search (FEFO), cart checkout, automatic stock deduction
+- **Reports (Admin)** — daily, monthly, and custom sales summaries
+- **Desk PIN** — simple gate before daily use; **Lock desk** when leaving the counter
 
-## Feature Summary
+## How staff sign in
 
-- **Stock Management**
-  - Drug catalog management
-  - Batch receiving and stock adjustments
-  - Reorder and expiry alerts
-- **POS**
-  - Fast product search and cart-based checkout
-  - Prescription validation for controlled items
-  - Mixed payment handling
-- **Reporting**
-  - Daily/monthly sales and gross profit
-  - Stock valuation and movement trends
-  - Expiry risk monitoring
-- **Access Control**
-  - Role-based permissions by user profile
-  - JWT-protected API and route guards
+| Step | What happens |
+|------|----------------|
+| Open app | Enter **desk PIN** (`KIOSK_PIN` in `backend/.env`) |
+| Daily work | Stock, Add medicine, Sales (no email/password) |
+| Reports | Click **Reports (Admin)** → admin email + password |
+| Leave counter | **Lock desk** |
 
-## Technology Stack
+A **staff user** exists in the database for API security; staff do not sign in with `staff@pharmacy.local` at the counter.
 
-- **Frontend:** React (TypeScript), Axios, React Router
-- **Backend:** FastAPI, Pydantic, SQLAlchemy, JWT auth
+## Technology stack
+
+- **Frontend:** React 18, Vite
+- **Backend:** FastAPI, Pydantic, SQLAlchemy, JWT
 - **Database:** PostgreSQL
-- **Security:** bcrypt password hashing, RBAC, audit logging
-- **Deployment:** Uvicorn/Gunicorn, Nginx reverse proxy, Docker (optional)
+- **Security:** bcrypt, role-based API checks, audit logs
 
-## Quick Start
+## Quick start
 
 1. Clone the repository.
-2. Configure environment variables (see `setup.md`).
-3. Start PostgreSQL and create the database.
-4. Run backend migrations and start the FastAPI server.
-5. Start the React frontend and log in with a seeded user.
+2. Configure `backend/.env` and `frontend/.env` — see `setup.md`.
+3. Create PostgreSQL database `pharmacy_db`.
+4. Run `python scripts/seed.py` in `backend/`.
+5. Start backend (`uvicorn`) and frontend (`npm run dev`).
+6. Open `http://localhost:3000` and enter your desk PIN.
 
-For complete setup details, see:
+## Documentation
 
-- `setup.md`
-- `deployment.md`
-- `database.md`
+| Document | Contents |
+|----------|----------|
+| `setup.md` | Install, env vars, seed, run, troubleshoot |
+| `deployment.md` | Pharmacy LAN deployment, production notes |
+| `features.md` | Feature breakdown |
+| `workflows.md` | Stock, sales, reports flows |
+| `api.md` | REST API reference |
+| `security.md` | Auth, desk PIN, LAN practices |
+| `roles_permissions.md` | Roles and API permissions |
+| `database.md` | Schema overview |
+| `architecture.md` | System structure |

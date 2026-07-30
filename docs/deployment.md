@@ -1,18 +1,53 @@
 # Deployment Guide
 
-## Local Deployment
+## Pharmacy LAN deployment (recommended)
 
-## 1) Start PostgreSQL
+Use one PC as the server inside the shop. Other devices (laptops, tablets) open the app in a browser over Wi‑Fi or Ethernet.
+
+### 1) Server PC
+
+- Install PostgreSQL, Python, Node.js.
+- Configure `backend/.env` (database, `KIOSK_PIN`, admin/staff seed values, `JWT_SECRET_KEY`).
+- Run `python scripts/seed.py`.
+- Start backend: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
+- Build and serve frontend, or run dev with network access:
+
+```bash
+cd frontend
+npm run build
+npm run preview -- --host 0.0.0.0 --port 3000
+```
+
+Find the server IP (Windows: `ipconfig`, e.g. `192.168.1.50`).
+
+### 2) Other pharmacy devices
+
+- Connect to **staff Wi‑Fi** (not guest/public Wi‑Fi if possible).
+- Set `VITE_API_BASE_URL=http://<server-ip>:8000/api/v1` before building the frontend, or use the same value in `frontend/.env` on the server if all devices load the UI from that machine.
+- Open `http://<server-ip>:3000` and bookmark it.
+- Staff use the **desk PIN**; only the owner/manager uses **admin login** for reports.
+
+### 3) Network security
+
+- Do **not** port-forward 3000 or 8000 on the router.
+- Use a Wi‑Fi password for staff devices only; prefer a separate guest network for customers.
+- Optionally restrict Windows Firewall on the server to your LAN subnet (e.g. `192.168.1.0/24`) for ports 3000 and 8000.
+
+---
+
+## Local development
+
+### 1) Start PostgreSQL
 
 - Ensure PostgreSQL service is running.
 - Create database `pharmacy_db`.
 
-## 2) Configure Environment
+### 2) Configure environment
 
-- Set backend environment variables (`DATABASE_URL`, `JWT_SECRET_KEY`, etc.).
-- Set frontend API URL (`VITE_API_BASE_URL`).
+- Backend: `backend/.env` — see `setup.md` for all variables (`KIOSK_PIN`, seed users, `DATABASE_URL`, etc.).
+- Frontend: `frontend/.env` — `VITE_API_BASE_URL=http://localhost:8000/api/v1`
 
-## 3) Run Migrations and Seed Data
+### 3) Migrations and seed
 
 ```bash
 cd backend
@@ -20,7 +55,7 @@ alembic upgrade head
 python scripts/seed.py
 ```
 
-## 4) Start Services
+### 4) Start services
 
 ```bash
 # Backend
@@ -32,104 +67,63 @@ cd frontend
 npm run dev -- --host 0.0.0.0 --port 3000
 ```
 
-## 5) Validate
+### 5) Validate
 
-- Login succeeds
-- Stock intake works
-- POS sale updates inventory
-- Reports return data
+- Desk PIN opens Stock, Add medicine, and Sales
+- Sale deducts batch stock (FEFO when batch not specified)
+- Admin login unlocks Reports
+- **Lock desk** returns to PIN screen
 
 ---
 
-## Production Deployment Guidelines
+## Production deployment guidelines
 
-## Infrastructure
+### Infrastructure
 
-- Deploy backend on Linux VM/container (e.g., Ubuntu + systemd or container orchestration).
-- Run PostgreSQL on managed DB service or dedicated secure server.
-- Serve frontend as static assets via Nginx or CDN.
+- Deploy backend on a Linux VM or container on the pharmacy LAN (or private VPN).
+- Run PostgreSQL on the same private network; do not expose the DB publicly.
+- Serve frontend as static files via Nginx from the server PC or a small local VM.
 
-## Backend Runtime
-
-Use Gunicorn + Uvicorn workers:
+### Backend runtime
 
 ```bash
 gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000
 ```
 
-## Reverse Proxy (Nginx)
+### Reverse proxy (Nginx)
 
-- Terminate TLS at Nginx.
+- Optional on LAN; useful for a single port (e.g. 80) and static files.
 - Proxy `/api/` to backend.
 - Serve frontend build from `/var/www/pharmacy-ui`.
 - Add security headers and request size limits.
 
-## Configuration and Secrets
+### Configuration and secrets
 
-- Store secrets in a vault or secure env injection pipeline.
-- Do not hardcode credentials in images or repository.
-- Separate dev/staging/prod configuration values.
-- Rotate application secrets with a documented schedule.
+- Set `KIOSK_PIN`, `JWT_SECRET_KEY`, and `SEED_*` via environment — never in git.
+- Rotate desk PIN and admin password when staff change.
+- Set `CORS_ORIGINS` to your real frontend origin(s) only.
 
-## Database Operations
+### Database operations
 
-- Enable automated daily backups.
-- Monitor replication/health (if HA setup).
-- Run migrations during deployment window with rollback strategy.
-- Test restore drills quarterly and document RPO/RTO.
+- Enable automated daily backups on the server PC or NAS.
+- Run migrations during a quiet window with a rollback plan.
+- Test restore periodically.
 
-## Observability
+### Observability
 
-- Centralized logs (backend, reverse proxy, DB)
-- Metrics: request rate, latency, error rate, CPU/memory
-- Alerts for API failures and DB resource saturation
-- Add security alerts: repeated failed logins, permission denied bursts, unusual void/refund rates.
+- Log backend errors to a file on the server.
+- Monitor disk space and PostgreSQL health.
+- Review failed desk PIN / admin login attempts in `audit_logs` if needed.
 
 ---
 
-## Optional Docker Setup
+## Optional Docker setup
 
-## Example `docker-compose.yml` (reference)
+See `docker-compose.yml` in the repository root (if present). Do not expose PostgreSQL to public networks; keep services on a private subnet.
 
-```yaml
-version: "3.9"
-services:
-  db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: pharmacy_db
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
-  backend:
-    build: ./backend
-    env_file:
-      - ./backend/.env
-    depends_on:
-      - db
-    ports:
-      - "8000:8000"
-
-  frontend:
-    build: ./frontend
-    env_file:
-      - ./frontend/.env
-    depends_on:
-      - backend
-    ports:
-      - "3000:3000"
-
-volumes:
-  pgdata:
-```
-
-## Docker Deployment Notes
+### Docker notes
 
 - Use multi-stage builds for smaller images.
 - Pin image tags and scan for vulnerabilities.
 - Do not run containers as root where possible.
-- Do not expose PostgreSQL to public networks; keep DB on private subnet/security group.
+- Mount `backend/.env` via secrets, not committed files.

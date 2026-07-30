@@ -1,86 +1,73 @@
 # Security Model
 
-## Authentication (JWT)
+## Intended deployment
 
-- Users authenticate with email/password.
-- Backend issues signed JWT access tokens with short expiry (10-15 minutes recommended).
+This system is designed for **one pharmacy on a private LAN** (shop Wi‑Fi / Ethernet). It is not intended to be exposed directly to the public internet without additional hardening (VPN, reverse proxy, IP allowlists).
+
+## Authentication
+
+### Desk PIN (daily use)
+
+- Staff enter a shared **desk PIN** (`KIOSK_PIN` in `backend/.env` only — not in the frontend bundle).
+- `POST /auth/desk-login` validates the PIN on the server, then issues a JWT for the seeded **Pharmacist** staff user.
+- Wrong PIN returns `401`; missing configuration returns `503`.
+
+### Admin login (reports)
+
+- Owner/manager uses email + password via `POST /auth/login`.
+- Only users with role `Admin` can call `/reports/*` endpoints.
+- The UI hides reports until admin credentials succeed; the API enforces this independently.
+
+### JWT sessions
+
 - Protected endpoints require `Authorization: Bearer <token>`.
-- Token payload contains user identity, role claims, and a unique token ID (`jti`).
-- Expired/invalid tokens return `401 Unauthorized`.
-- Refresh tokens should be rotated on each refresh and revoked on logout.
-- Role or password changes should invalidate all active sessions for that user.
+- Access tokens expire per `JWT_EXPIRE_MINUTES` (default 15 minutes).
+- Expired or invalid tokens return `401 Unauthorized`.
 
-## Password Security (bcrypt)
+### Staff account (background)
 
-- Passwords are never stored in plain text.
-- Passwords are hashed with bcrypt using configurable work factor.
-- Login verification uses constant-time hash compare.
-- Password policy (recommended):
-  - Minimum 8-12 characters
-  - Mixed character classes
-  - Block weak/common passwords
+- `SEED_STAFF_EMAIL` / `SEED_STAFF_PASSWORD` define the internal user used after desk PIN success.
+- Staff do not type these credentials at the counter; keep them in `backend/.env` only.
 
-## Role-Based Access Control (RBAC)
+## Password security (bcrypt)
 
-- Authorization is enforced server-side for every protected route.
-- Roles: `Admin`, `Pharmacist`, `Cashier`
-- Access checks happen before business logic execution.
-- Sensitive actions (stock adjustments, role changes, report exports) require elevated roles.
-- Prefer permission-based checks in code (for example `sale.void`, `stock.adjust`, `prescription.finalize`) instead of role names alone.
-- High-risk operations (sale voids and manual stock adjustment) should require dual approval in production.
+- Passwords are hashed with bcrypt; never stored in plain text.
+- Admin and staff seed passwords are set via `scripts/seed.py` from environment variables.
 
-## Input Validation
+## Role-based access control (RBAC)
 
-- Request payloads validated with Pydantic schemas.
-- Validation includes:
-  - Required fields
-  - Type checks
-  - Range checks (quantity > 0, price >= 0)
-  - Enum constraints for sale/payment types
-- Invalid input returns structured `422` or `400` response.
-- All SQL must be parameterized (never string-concatenated SQL).
-- Add output encoding/sanitization for user-supplied data rendered in UI to reduce XSS risk.
+- Authorization is enforced server-side on every protected route.
+- Roles: `Admin`, `Pharmacist`, `Cashier` (staff desk session uses `Pharmacist`).
+- **Reports:** `Admin` only.
+- **Stock / sales / drug create:** `Admin`, `Pharmacist`, and/or `Cashier` per endpoint (see `roles_permissions.md`).
 
-## Audit Logging
+## Network practices (pharmacy LAN)
 
-- Mutating operations and security-relevant events are logged in `audit_logs`.
-- Typical events:
-  - Login success/failure
-  - User/role changes
-  - Batch creation/adjustment
-  - Sale finalization/voids
-- Log entries capture user, action, target entity, timestamp, and metadata.
-- Audit logs should be append-only from application perspective.
-- Denied access attempts, failed logins, and suspicious bursts must also be logged.
-- Audit logs should be forwarded to centralized immutable storage for tamper resistance.
+- Use **staff-only Wi‑Fi**; avoid sharing the desk PIN or app URL with customers.
+- Do not port-forward application ports on the router.
+- Prefer separate **guest Wi‑Fi** with client isolation for customer internet.
+- Optionally restrict inbound firewall rules on the server PC to your LAN subnet.
 
-## API Protection Best Practices
+## API protection
 
-- Enforce HTTPS in production.
-- Configure strict CORS allowlist (no wildcard in production).
-- Apply request rate limiting on auth endpoints.
-- Sanitize all user-provided strings before rendering in UI.
-- Avoid leaking stack traces to clients.
-- Add account lockout/backoff policy after repeated failed login attempts.
-- Use idempotency keys for checkout and payment endpoints to prevent duplicate transactions.
+- Configure `CORS_ORIGINS` to your real frontend origin(s) only.
+- Use a strong `JWT_SECRET_KEY` (32+ characters). Run `python scripts/generate_secrets.py` for sample values.
+- Change default `KIOSK_PIN`, admin password, and staff password before go-live.
+- **Rate limiting:** `/auth/desk-login` and `/auth/login` lock out an IP after 5 failed attempts in 5 minutes (15-minute lockout). Tune via `AUTH_RATE_LIMIT_*` in `.env`.
+- **API docs:** `/docs` is disabled when `APP_ENV=production`.
+- **Startup checks:** weak secrets log a warning in development and block startup in production.
+- Enforce HTTPS if the app is ever accessed outside the LAN (VPN or reverse proxy).
 
-## Data Protection
+## Audit logging
 
-- Restrict DB user privileges to least required operations.
-- Encrypt database backups and keep retention policies.
-- Store secrets in environment or vault, never in source control.
-- Rotate JWT secret and admin credentials periodically.
-- Separate application DB role from migration/admin DB role.
-- Rotate and document secrets with a fixed schedule (for example every 90 days).
+- Login, desk login, and mutating operations are recorded in `audit_logs` where implemented.
+- Review logs periodically for failed admin or desk access attempts.
 
-## Operational Security Checklist
+## Operational checklist
 
-- [ ] HTTPS configured and valid TLS certificates
-- [ ] Strong secrets and key rotation policy
-- [ ] Principle-of-least-privilege role design
-- [ ] Centralized logs and monitoring alerts
-- [ ] Regular patching for OS/runtime/dependencies
-- [ ] Tested backup and restore procedures
-- [ ] Rate limiting and account lockout on authentication endpoints
-- [ ] Session revocation on role/password changes
-- [ ] Security testing in CI (SAST, dependency scan, container scan)
+- [ ] `KIOSK_PIN` set to a strong, private value
+- [ ] Default seed passwords changed
+- [ ] `JWT_SECRET_KEY` replaced
+- [ ] `.env` files not committed to git
+- [ ] API and DB not reachable from the public internet
+- [ ] PostgreSQL backups enabled on the server PC
