@@ -1351,6 +1351,12 @@ export function App() {
                               </div>
                             ) : (
                               <div className="action-buttons stock-row-actions">
+                                <button type="button" onClick={() => startEditDrug(s)}>
+                                  Edit
+                                </button>
+                                <button type="button" onClick={() => deleteDrug(s.drug_id)}>
+                                  Delete
+                                </button>
                                 <input
                                   className="stock-cart-qty"
                                   type="number"
@@ -1364,16 +1370,11 @@ export function App() {
                                 />
                                 <button
                                   type="button"
+                                  className="btn-add-to-cart"
                                   onClick={() => addStockRowToCart(s)}
                                   disabled={!s.batch_id || s.is_expired || Number(s.total_quantity || 0) <= 0}
                                 >
                                   Add to cart
-                                </button>
-                                <button type="button" onClick={() => startEditDrug(s)}>
-                                  Edit
-                                </button>
-                                <button type="button" onClick={() => deleteDrug(s.drug_id)}>
-                                  Delete
                                 </button>
                               </div>
                             )}
