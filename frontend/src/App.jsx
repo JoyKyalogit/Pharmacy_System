@@ -310,7 +310,7 @@ export function App() {
       setActivePage(role === "Admin" ? "reports" : "stock");
       setAppMessage("");
     } catch (err) {
-      setAppMessage("Incorrect PIN");
+      setAppMessage(err.message || "Incorrect PIN");
     } finally {
       setIsSigningIn(false);
     }
