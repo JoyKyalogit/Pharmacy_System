@@ -166,6 +166,37 @@ def create_drug(
     return {"id": drug.id, "name": drug.name, "sku": drug.sku, "reorder_level": drug.reorder_level, "is_active": drug.is_active}
 
 
+@router.get("/drugs/match")
+def match_drug_by_name(
+    name: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("Admin", "Pharmacist")),
+):
+    term = name.strip()
+    if not term:
+        return {"match": None}
+    drug = db.scalar(
+        select(Drug)
+        .where(Drug.is_active.is_(True), func.lower(Drug.name) == term.lower())
+        .order_by(Drug.id.asc())
+    )
+    if not drug:
+        return {"match": None}
+    latest_batch = db.scalar(select(Batch).where(Batch.drug_id == drug.id).order_by(Batch.id.desc()))
+    return {
+        "match": {
+            "drug_id": drug.id,
+            "drug_name": drug.name,
+            "unit": drug.unit,
+            "purchase_unit": drug.purchase_unit,
+            "units_per_purchase": int(drug.units_per_purchase or 1),
+            "reorder_level": int(drug.reorder_level or 0),
+            "last_selling_price": float(latest_batch.selling_price) if latest_batch else None,
+            "last_unit_cost": float(latest_batch.unit_cost) if latest_batch else None,
+        }
+    }
+
+
 @router.get("/drugs/search")
 def search_drugs(
     q: str = Query(..., min_length=1),
@@ -414,7 +445,7 @@ def stock_levels(db: Session = Depends(get_db), user: User = Depends(require_rol
                 "unit_price": float(r.selling_price or 0),
                 "unit_cost": float(r.unit_cost or 0),
                 "reorder_level": r.reorder_level,
-                "is_low_stock": total_for_drug <= r.reorder_level,
+                "is_low_stock": qty <= r.reorder_level,
                 "nearest_expiry": nearest_expiry,
                 "days_to_expiry": days_to_expiry,
                 "is_near_expiry": is_near_expiry,
@@ -566,58 +597,34 @@ def create_sale(
     sale_lines: list[dict] = []
     for item in payload.items:
         needed = item.quantity
-        if item.batch_id:
-            batch = db.scalar(
-                select(Batch)
-                .where(
-                    Batch.id == item.batch_id,
-                    Batch.drug_id == item.drug_id,
-                    Batch.expiry_date >= date.today(),
-                    Batch.quantity_available > 0,
-                )
-                .with_for_update()
-            )
-            if not batch:
-                raise HTTPException(status_code=400, detail=f"Batch unavailable for drug_id={item.drug_id}")
-            if batch.quantity_available < needed:
-                raise HTTPException(status_code=400, detail=f"INSUFFICIENT_STOCK for batch_id={item.batch_id}")
-            batch.quantity_available -= needed
-            line_total = (item.unit_price * needed) - item.discount
-            subtotal += item.unit_price * needed
-            discount_total += item.discount
-            sale_lines.append(
-                {
-                    "drug_id": item.drug_id,
-                    "batch_id": batch.id,
-                    "quantity": needed,
-                    "unit_price": item.unit_price,
-                    "discount_amount": item.discount,
-                    "line_total": line_total,
-                }
-            )
-            continue
-
-        batches = db.scalars(
+        batch = db.scalar(
             select(Batch)
-            .where(Batch.drug_id == item.drug_id, Batch.expiry_date >= date.today(), Batch.quantity_available > 0)
-            .order_by(Batch.expiry_date.asc())
-            .with_for_update()
-        ).all()
-        available = sum(b.quantity_available for b in batches)
-        if available < needed:
-            raise HTTPException(status_code=400, detail=f"INSUFFICIENT_STOCK for drug_id={item.drug_id}")
-        for batch in batches:
-            if needed <= 0:
-                break
-            take = min(needed, batch.quantity_available)
-            batch.quantity_available -= take
-            line_total = (item.unit_price * take) - item.discount
-            subtotal += item.unit_price * take
-            discount_total += item.discount
-            sale_lines.append(
-                {"drug_id": item.drug_id, "batch_id": batch.id, "quantity": take, "unit_price": item.unit_price, "discount_amount": item.discount, "line_total": line_total}
+            .where(
+                Batch.id == item.batch_id,
+                Batch.drug_id == item.drug_id,
+                Batch.expiry_date >= date.today(),
+                Batch.quantity_available > 0,
             )
-            needed -= take
+            .with_for_update()
+        )
+        if not batch:
+            raise HTTPException(status_code=400, detail=f"Batch unavailable for drug_id={item.drug_id}")
+        if batch.quantity_available < needed:
+            raise HTTPException(status_code=400, detail=f"INSUFFICIENT_STOCK for batch_id={item.batch_id}")
+        batch.quantity_available -= needed
+        line_total = (item.unit_price * needed) - item.discount
+        subtotal += item.unit_price * needed
+        discount_total += item.discount
+        sale_lines.append(
+            {
+                "drug_id": item.drug_id,
+                "batch_id": batch.id,
+                "quantity": needed,
+                "unit_price": item.unit_price,
+                "discount_amount": item.discount,
+                "line_total": line_total,
+            }
+        )
 
     grand_total = subtotal - discount_total
     year = datetime.now().year

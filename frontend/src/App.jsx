@@ -47,6 +47,18 @@ async function apiRequest(path, method, token, body, extraHeaders = {}, options 
 const PHARMACY_NAME = "LINDAH PHARMACY";
 const PHARMACY_PO_BOX = "P.O BOX 135590100 MKS";
 const PHARMACY_TELEPHONE = "Telephone:0757902973";
+const EMPTY_MEDICINE_FORM = {
+  name: "",
+  batch_no: "",
+  number_of_packets: "",
+  tablets_per_packet: "",
+  price_per_packet: "",
+  price_per_tablet: "",
+  buying_price: "",
+  expiry_date: "",
+  reorder_level: "10",
+  existing_drug_id: null
+};
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -75,7 +87,7 @@ function buildReceiptPrintDocument(receipt) {
       (line) => `
         <tr>
           <td class="item-name">${escapeHtml(line.drug_name)}</td>
-          <td class="item-qty">${escapeHtml(line.quantity_label || line.quantity)}</td>
+          <td class="item-qty">${escapeHtml(line.quantity)}</td>
           <td class="item-amt">${Number(line.line_total || 0).toFixed(2)}</td>
         </tr>`
     )
@@ -189,16 +201,8 @@ export function App() {
   const [pinResets, setPinResets] = useState({});
   const [nameEdits, setNameEdits] = useState({});
   const [savingNameUserId, setSavingNameUserId] = useState(null);
-  const [medicineForm, setMedicineForm] = useState({
-    name: "",
-    batch_no: "",
-    number_of_packets: "",
-    tablets_per_packet: "",
-    price_per_packet: "",
-    price_per_tablet: "",
-    buying_price: "",
-    expiry_date: ""
-  });
+  const [medicineForm, setMedicineForm] = useState({ ...EMPTY_MEDICINE_FORM });
+  const [stockCartQty, setStockCartQty] = useState({});
   const [saleForm, setSaleForm] = useState({
     quantity: 1,
     quantity_unit: "base",
@@ -327,8 +331,11 @@ export function App() {
     setShowSaleSearchDropdown(false);
     setSelectedDrug(null);
     setDrugSearch("");
+    setStockSearch("");
+    setStockCartQty({});
     setDailySales(null);
     setUsers([]);
+    setMedicineForm({ ...EMPTY_MEDICINE_FORM });
     if (message) setAppMessage(message);
   }, []);
 
@@ -345,6 +352,15 @@ export function App() {
     setActivePage("stock");
     setLoginPin("");
     loadDeskStaff();
+  };
+
+  const goToPage = (page) => {
+    setStockSearch("");
+    setDrugSearch("");
+    setSearchResults([]);
+    setShowSaleSearchDropdown(false);
+    setSelectedDrug(null);
+    setActivePage(page);
   };
 
   const closeReceiptStep = () => {
@@ -507,6 +523,47 @@ export function App() {
     return tabletsPerPacket > 0 ? tabletsPerPacket : 1;
   };
 
+  useEffect(() => {
+    if (!token || activePage !== "admin") return undefined;
+    const name = medicineForm.name.trim();
+    if (name.length < 2) {
+      if (medicineForm.existing_drug_id) {
+        setMedicineForm((prev) => ({ ...prev, existing_drug_id: null }));
+      }
+      return undefined;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const data = await apiRequest(`/drugs/match?name=${encodeURIComponent(name)}`, "GET", token);
+        const match = data?.match;
+        if (!match) {
+          setMedicineForm((prev) => (prev.existing_drug_id ? { ...prev, existing_drug_id: null } : prev));
+          return;
+        }
+        setMedicineForm((prev) => {
+          if (prev.name.trim().toLowerCase() !== String(match.drug_name || "").toLowerCase()) return prev;
+          if (prev.existing_drug_id === match.drug_id) return prev;
+          const hasTablets = match.unit === "tablet" || Number(match.units_per_purchase || 1) > 1;
+          return {
+            ...prev,
+            existing_drug_id: match.drug_id,
+            name: match.drug_name,
+            tablets_per_packet: hasTablets ? String(match.units_per_purchase || "") : "",
+            price_per_tablet:
+              hasTablets && match.last_selling_price != null ? String(match.last_selling_price) : prev.price_per_tablet,
+            price_per_packet:
+              !hasTablets && match.last_selling_price != null ? String(match.last_selling_price) : prev.price_per_packet,
+            buying_price: match.last_unit_cost != null ? String(match.last_unit_cost) : prev.buying_price,
+            reorder_level: String(match.reorder_level ?? prev.reorder_level)
+          };
+        });
+      } catch {
+        /* ignore lookup failures while typing */
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [medicineForm.name, medicineForm.existing_drug_id, token, activePage]);
+
   const createMedicine = async () => {
     if (!medicineForm.name.trim()) {
       setAppMessage("Medicine name is required.");
@@ -517,7 +574,7 @@ export function App() {
       return;
     }
     if (!medicineForm.expiry_date) {
-      setAppMessage("Expiry date is required.");
+      setAppMessage("Expiry date is required. Medicine was not added.");
       return;
     }
     if (!medicineForm.number_of_packets || Number(medicineForm.number_of_packets) <= 0) {
@@ -528,35 +585,44 @@ export function App() {
       setAppMessage("Buying price is required.");
       return;
     }
+    const minStock = Number(medicineForm.reorder_level);
+    if (Number.isNaN(minStock) || minStock < 0) {
+      setAppMessage("Minimum stock level must be zero or greater.");
+      return;
+    }
     const tabletsPerPacket = Number(medicineForm.tablets_per_packet || 0);
     const hasTablets = tabletsPerPacket > 0;
     if (hasTablets) {
       if (!medicineForm.price_per_tablet || Number(medicineForm.price_per_tablet) <= 0) {
-        setAppMessage("Price per tablet must be greater than zero.");
+        setAppMessage("Selling price per tablet must be greater than zero.");
         return;
       }
     } else if (!medicineForm.price_per_packet || Number(medicineForm.price_per_packet) <= 0) {
-      setAppMessage("Price per bottle must be greater than zero.");
+      setAppMessage("Selling price per bottle must be greater than zero.");
       return;
     }
     setIsSubmittingDrug(true);
     try {
-      const sku = `${medicineForm.name.replace(/\s+/g, "-").toUpperCase()}-${Date.now().toString().slice(-5)}`;
-      const dispenseUnit = hasTablets ? "tablet" : "bottle";
-      const purchaseUnit = hasTablets ? "packet" : "bottle";
-      const createdDrug = await apiRequest("/drugs", "POST", token, {
-        name: medicineForm.name.trim(),
-        sku,
-        unit: dispenseUnit,
-        purchase_unit: purchaseUnit,
-        units_per_purchase: computeUnitsPerPurchase(),
-        category: "General",
-        reorder_level: 10,
-        is_prescription_required: false
-      });
+      let drugId = medicineForm.existing_drug_id;
+      if (drugId) {
+        await apiRequest(`/drugs/${drugId}`, "PUT", token, { reorder_level: minStock });
+      } else {
+        const sku = `${medicineForm.name.replace(/\s+/g, "-").toUpperCase()}-${Date.now().toString().slice(-5)}`;
+        const createdDrug = await apiRequest("/drugs", "POST", token, {
+          name: medicineForm.name.trim(),
+          sku,
+          unit: hasTablets ? "tablet" : "bottle",
+          purchase_unit: hasTablets ? "packet" : "bottle",
+          units_per_purchase: computeUnitsPerPurchase(),
+          category: "General",
+          reorder_level: minStock,
+          is_prescription_required: false
+        });
+        drugId = createdDrug.id;
+      }
 
       await apiRequest("/stock/batches", "POST", token, {
-        drug_id: createdDrug.id,
+        drug_id: drugId,
         supplier_id: null,
         batch_no: medicineForm.batch_no.trim(),
         expiry_date: medicineForm.expiry_date,
@@ -565,17 +631,8 @@ export function App() {
         selling_price: hasTablets ? Number(medicineForm.price_per_tablet) : Number(medicineForm.price_per_packet)
       });
 
-      setAppMessage("Medicine added.");
-      setMedicineForm({
-        name: "",
-        batch_no: "",
-        number_of_packets: "",
-        tablets_per_packet: "",
-        price_per_packet: "",
-        price_per_tablet: "",
-        buying_price: "",
-        expiry_date: ""
-      });
+      setAppMessage(medicineForm.existing_drug_id ? "New batch added to existing medicine." : "Medicine added.");
+      setMedicineForm({ ...EMPTY_MEDICINE_FORM });
       await loadStock();
     } catch (err) {
       setAppMessage(`Add medicine failed: ${err.message}`);
@@ -592,9 +649,13 @@ export function App() {
         setAppMessage("Add at least one item to cart.");
         return;
       }
+      if (cart.some((item) => !item.batch_id)) {
+        setAppMessage("Each cart item must be a specific batch.");
+        return;
+      }
       const items = cart.map((item) => ({
         drug_id: Number(item.drug_id),
-        batch_id: item.batch_id ? Number(item.batch_id) : null,
+        batch_id: Number(item.batch_id),
         quantity: Number(item.quantity),
         unit_price: Number(item.unit_price),
         discount: Number(item.discount || 0)
@@ -869,8 +930,8 @@ export function App() {
       }
       updated[existingIndex] = {
         ...updated[existingIndex],
-        quantity: newQty,
-        quantity_label: `${newQty} ${selectedDrug.unit}`,
+                      quantity: newQty,
+                      quantity_label: String(newQty),
         discount: newDiscount,
         line_total: newGross - newDiscount
       };
@@ -886,7 +947,7 @@ export function App() {
           batch_no: selectedDrug.batch_no,
           expiry_date: selectedDrug.expiry_date,
           quantity: qtyInBaseUnit,
-          quantity_label: `${qtyInBaseUnit} ${selectedDrug.unit}`,
+          quantity_label: String(qtyInBaseUnit),
           unit_price: unitPrice,
           discount,
           line_total: gross - discount
@@ -900,6 +961,63 @@ export function App() {
     if (saleSearchInputRef.current) {
       saleSearchInputRef.current.focus();
     }
+  };
+
+  const addStockRowToCart = (row) => {
+    if (!row?.batch_id) {
+      setAppMessage("This stock row has no batch to sell.");
+      return;
+    }
+    if (row.is_expired) {
+      setAppMessage("Cannot sell expired stock.");
+      return;
+    }
+    const qty = Number(stockCartQty[row.batch_id] || 1);
+    if (!qty || qty <= 0) {
+      setAppMessage("Quantity must be greater than zero.");
+      return;
+    }
+    if (qty > Number(row.total_quantity || 0)) {
+      setAppMessage(`Only ${row.total_quantity} available in this batch.`);
+      return;
+    }
+    const unitPrice = Number(row.unit_price || 0);
+    const lineKey = `${row.drug_id}-${row.batch_id}`;
+    const existingIndex = cart.findIndex((i) => i.line_key === lineKey);
+    if (existingIndex >= 0) {
+      const updated = [...cart];
+      const newQty = updated[existingIndex].quantity + qty;
+      if (newQty > Number(row.total_quantity || 0)) {
+        setAppMessage(`Only ${row.total_quantity} available in this batch.`);
+        return;
+      }
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        quantity: newQty,
+        quantity_label: String(newQty),
+        line_total: newQty * updated[existingIndex].unit_price - Number(updated[existingIndex].discount || 0)
+      };
+      setCart(updated);
+    } else {
+      setCart((prev) => [
+        ...prev,
+        {
+          line_key: lineKey,
+          drug_id: row.drug_id,
+          batch_id: row.batch_id,
+          drug_name: row.drug_name,
+          batch_no: row.batch_no,
+          expiry_date: row.nearest_expiry,
+          quantity: qty,
+          quantity_label: String(qty),
+          unit_price: unitPrice,
+          discount: 0,
+          line_total: qty * unitPrice
+        }
+      ]);
+    }
+    setStockCartQty((prev) => ({ ...prev, [row.batch_id]: "1" }));
+    setAppMessage(`${row.drug_name} (batch ${row.batch_no || "-"}) added to cart. Open Transact to finish.`);
   };
 
   const removeCartLine = (lineKey) => {
@@ -924,14 +1042,8 @@ export function App() {
     .sort((a, b) => a.drug_name.localeCompare(b.drug_name));
 
   const uniqueDrugIds = new Set(stock.map((s) => s.drug_id));
-  const lowStockItems = stock.filter((s) => s.is_low_stock);
-  const lowStockUnique = [];
-  const seenLow = new Set();
-  for (const item of lowStockItems) {
-    if (seenLow.has(item.drug_id)) continue;
-    seenLow.add(item.drug_id);
-    lowStockUnique.push(item);
-  }
+  const lowStockItems = stock.filter((s) => s.is_low_stock && s.batch_id);
+  const lowStockUnique = lowStockItems;
   const nearExpiryItems = stock.filter((s) => s.is_near_expiry);
   const expiredItems = stock.filter((s) => s.is_expired);
   const totalMedicines = uniqueDrugIds.size;
@@ -1025,37 +1137,37 @@ export function App() {
               <button
                 type="button"
                 className={activePage === "stock" ? "active-tab" : ""}
-                onClick={() => setActivePage("stock")}
+                onClick={() => goToPage("stock")}
               >
                 Stock
               </button>
               <button
                 type="button"
                 className={activePage === "admin" ? "active-tab" : ""}
-                onClick={() => setActivePage("admin")}
+                onClick={() => goToPage("admin")}
               >
                 Add medicine
               </button>
               <button
                 type="button"
                 className={activePage === "sales" ? "active-tab" : ""}
-                onClick={() => setActivePage("sales")}
+                onClick={() => goToPage("sales")}
               >
-                Sales
+                Transact{cart.length ? ` (${cart.length})` : ""}
               </button>
               {isAdminSession ? (
                 <>
                   <button
                     type="button"
                     className={`nav-reports-admin${activePage === "reports" ? " active-tab" : ""}`}
-                    onClick={() => setActivePage("reports")}
+                    onClick={() => goToPage("reports")}
                   >
                     Reports (Admin)
                   </button>
                   <button
                     type="button"
                     className={`nav-reports-admin${activePage === "users" ? " active-tab" : ""}`}
-                    onClick={() => setActivePage("users")}
+                    onClick={() => goToPage("users")}
                   >
                     Pharmacists
                   </button>
@@ -1077,56 +1189,42 @@ export function App() {
                 </section>
 
                 <section className="kpi-grid kpi-grid-stock">
-                  <div className="kpi-card">
+                  <div className="kpi-card kpi-card-compact">
                     <p className="kpi-label">Medicines</p>
                     <h3>{totalMedicines}</h3>
                   </div>
-                  <div className="kpi-card">
+                  <div className="kpi-card kpi-card-compact">
                     <p className="kpi-label">Units in stock</p>
                     <h3>{totalUnitsInStock}</h3>
                   </div>
-                  <div className={`kpi-card ${lowStockUnique.length > 0 ? "kpi-card-alert" : ""}`}>
-                    <p className="kpi-label">Low stock alerts</p>
-                    <h3>{lowStockUnique.length}</h3>
+                </section>
+
+                <section className="alert-strip">
+                  <div className={`alert-chip ${lowStockUnique.length > 0 ? "alert-chip-warn" : ""}`}>
+                    Low stock: {lowStockUnique.length}
                     {lowStockUnique.length > 0 ? (
-                      <p className="kpi-detail">
-                        {lowStockUnique.map((i) => `${i.drug_name}`).join(", ")}
-                      </p>
-                    ) : (
-                      <p className="kpi-detail kpi-detail-muted">All medicines above reorder level</p>
-                    )}
+                      <span className="alert-chip-names">
+                        {lowStockUnique.map((i) => `${i.drug_name}${i.batch_no ? ` · ${i.batch_no}` : ""}`).join(", ")}
+                      </span>
+                    ) : null}
                   </div>
-                </section>
-
-                <section className="kpi-grid">
-                  <div className={`kpi-card kpi-card-wide ${nearExpiryItems.length > 0 ? "kpi-card-expiry" : ""}`}>
-                    <p className="kpi-label">Short expiry alerts (within 6 months)</p>
-                    <h3>{nearExpiryItems.length}</h3>
+                  <div className={`alert-chip ${nearExpiryItems.length > 0 ? "alert-chip-expiry" : ""}`}>
+                    Expiring in 3 months: {nearExpiryItems.length}
                     {nearExpiryItems.length > 0 ? (
-                      <p className="kpi-detail">
-                        {nearExpiryItems
-                          .map(
-                            (i) =>
-                              `${i.drug_name} (expires ${i.nearest_expiry}, ${i.days_to_expiry} days left, ${i.total_quantity} ${i.unit} remaining)`
-                          )
-                          .join(", ")}
-                      </p>
-                    ) : (
-                      <p className="kpi-detail kpi-detail-muted">No medicines expiring within 6 months</p>
-                    )}
+                      <span className="alert-chip-names">
+                        {nearExpiryItems.map((i) => `${i.drug_name}${i.batch_no ? ` · ${i.batch_no}` : ""}`).join(", ")}
+                      </span>
+                    ) : null}
                   </div>
-                </section>
-
-                {expiredItems.length > 0 ? (
-                  <section className="kpi-grid">
-                    <div className="kpi-card kpi-card-wide kpi-card-expired">
-                      <p className="kpi-label">Expired stock</p>
-                      <p className="kpi-detail">
-                        {expiredItems.map((i) => `${i.drug_name} (expired ${i.nearest_expiry})`).join(", ")}
-                      </p>
+                  {expiredItems.length > 0 ? (
+                    <div className="alert-chip alert-chip-expired">
+                      Expired: {expiredItems.length}
+                      <span className="alert-chip-names">
+                        {expiredItems.map((i) => `${i.drug_name}${i.batch_no ? ` · ${i.batch_no}` : ""}`).join(", ")}
+                      </span>
                     </div>
-                  </section>
-                ) : null}
+                  ) : null}
+                </section>
 
                 <section className="card">
                   <div className="stock-toolbar">
@@ -1252,7 +1350,25 @@ export function App() {
                                 </button>
                               </div>
                             ) : (
-                              <div className="action-buttons">
+                              <div className="action-buttons stock-row-actions">
+                                <input
+                                  className="stock-cart-qty"
+                                  type="number"
+                                  min="1"
+                                  value={stockCartQty[s.batch_id] ?? "1"}
+                                  onChange={(e) =>
+                                    setStockCartQty({ ...stockCartQty, [s.batch_id]: e.target.value })
+                                  }
+                                  disabled={!s.batch_id || s.is_expired}
+                                  title="Quantity to cart"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => addStockRowToCart(s)}
+                                  disabled={!s.batch_id || s.is_expired || Number(s.total_quantity || 0) <= 0}
+                                >
+                                  Add to cart
+                                </button>
                                 <button type="button" onClick={() => startEditDrug(s)}>
                                   Edit
                                 </button>
@@ -1279,9 +1395,16 @@ export function App() {
                   Medicine Name
                   <input
                     value={medicineForm.name}
-                    onChange={(e) => setMedicineForm({ ...medicineForm, name: e.target.value })}
+                    onChange={(e) =>
+                      setMedicineForm({ ...medicineForm, name: e.target.value, existing_drug_id: null })
+                    }
                   />
                 </label>
+                {medicineForm.existing_drug_id ? (
+                  <p className="sales-helper-text">
+                    Existing medicine found. Batch fields are ready to edit for a new batch.
+                  </p>
+                ) : null}
                 <label>
                   Batch number
                   <input
@@ -1306,7 +1429,7 @@ export function App() {
                   />
                 </label>
                 <label>
-                  Price per tablet
+                  Selling price per tablet
                   <input
                     type="number"
                     step="0.01"
@@ -1345,8 +1468,18 @@ export function App() {
                   Expiry Date
                   <input
                     type="date"
+                    required
                     value={medicineForm.expiry_date}
                     onChange={(e) => setMedicineForm({ ...medicineForm, expiry_date: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Minimum stock level
+                  <input
+                    type="number"
+                    min="0"
+                    value={medicineForm.reorder_level}
+                    onChange={(e) => setMedicineForm({ ...medicineForm, reorder_level: e.target.value })}
                   />
                 </label>
               </div>
@@ -1358,7 +1491,7 @@ export function App() {
 
             {activePage === "sales" ? (
               <section className="card">
-              <h2>Sales</h2>
+              <h2>Transact</h2>
               <div className="grid">
                 <div className="sale-search-wrap" ref={saleSearchWrapRef}>
                   <input
@@ -1511,14 +1644,26 @@ export function App() {
                   <strong>Change to give:</strong> {calcChange === null ? "—" : calcChange.toFixed(2)}
                 </p>
               </div>
-              <button type="button" onClick={clearCart} disabled={cart.length === 0 || isSubmittingSale}>
-                Clear Cart
-              </button>
-              {!lastReceipt ? (
-                <button type="button" onClick={submitSale} disabled={isSubmittingSale || cart.length === 0}>
-                  {isSubmittingSale ? "Processing..." : "Finalize Sale"}
+              <div className="sale-actions">
+                <button
+                  type="button"
+                  className="btn-clear-cart"
+                  onClick={clearCart}
+                  disabled={cart.length === 0 || isSubmittingSale}
+                >
+                  Clear cart
                 </button>
-              ) : null}
+                {!lastReceipt ? (
+                  <button
+                    type="button"
+                    className="btn-finalize-sale"
+                    onClick={submitSale}
+                    disabled={isSubmittingSale || cart.length === 0}
+                  >
+                    {isSubmittingSale ? "Processing..." : "Finalize sale"}
+                  </button>
+                ) : null}
+              </div>
               </section>
             ) : null}
 
@@ -1551,7 +1696,7 @@ export function App() {
             {activePage === "users" && isAdminSession ? (
               <section className="card">
                 <h2>Pharmacists</h2>
-                <button type="button" onClick={() => setActivePage("stock")}>
+                <button type="button" onClick={() => goToPage("stock")}>
                   Back to stock
                 </button>
                 <p className="sales-helper-text">Add a user.</p>
@@ -1675,7 +1820,7 @@ export function App() {
             {activePage === "reports" && isAdminSession ? (
               <section className="card">
                 <h2>Sales Reports</h2>
-                <button type="button" onClick={() => setActivePage("stock")}>
+                <button type="button" onClick={() => goToPage("stock")}>
                   Back to stock
                 </button>
                 <div className="grid">

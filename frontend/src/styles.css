@@ -254,6 +254,93 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
+.kpi-card-compact {
+  padding: 8px 12px;
+}
+
+.kpi-card-compact h3 {
+  font-size: 22px;
+  margin: 2px 0 0;
+}
+
+.alert-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.alert-chip {
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  line-height: 1.35;
+}
+
+.alert-chip-names {
+  display: block;
+  max-width: 420px;
+  margin-top: 2px;
+  font-weight: 500;
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.alert-chip-warn {
+  background: #fff7e8;
+  border-color: #f7b955;
+}
+
+.alert-chip-expiry {
+  background: #fff4e6;
+  border-color: #fb923c;
+}
+
+.alert-chip-expired {
+  background: #fef2f2;
+  border-color: #f87171;
+}
+
+.stock-cart-qty {
+  width: 72px;
+  margin: 0;
+  padding: 8px 10px;
+}
+
+.stock-row-actions {
+  flex-wrap: wrap;
+}
+
+.sale-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 48px;
+  margin-top: 16px;
+}
+
+.sale-actions button {
+  min-width: 160px;
+}
+
+.btn-clear-cart {
+  background: #64748b;
+  border-color: #64748b;
+}
+
+.btn-finalize-sale {
+  background: #0b69d1;
+  border-color: #0b69d1;
+}
+
 .stock-toolbar {
   display: flex;
   align-items: center;

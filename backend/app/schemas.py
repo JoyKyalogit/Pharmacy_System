@@ -69,7 +69,7 @@ class BatchUpdate(BaseModel):
 
 class SaleItemIn(BaseModel):
     drug_id: int
-    batch_id: int | None = None
+    batch_id: int = Field(..., gt=0)
     quantity: int = Field(..., gt=0)
     unit_price: float = Field(..., ge=0)
     discount: float = Field(0, ge=0)

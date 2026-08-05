@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     auth_rate_limit_max_attempts: int = 5
     auth_rate_limit_window_seconds: int = 300
     auth_rate_limit_lockout_seconds: int = 900
-    expiry_warning_days: int = 180
+    expiry_warning_days: int = 90
 
 
 settings = Settings()
