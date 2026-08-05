@@ -972,9 +972,9 @@ export function App() {
       setAppMessage("Cannot sell expired stock.");
       return;
     }
-    const qty = Number(stockCartQty[row.batch_id] || 1);
-    if (!qty || qty <= 0) {
-      setAppMessage("Quantity must be greater than zero.");
+    const qty = Number(stockCartQty[row.batch_id]);
+    if (!stockCartQty[row.batch_id] || Number.isNaN(qty) || qty <= 0) {
+      setAppMessage("Enter a quantity first.");
       return;
     }
     if (qty > Number(row.total_quantity || 0)) {
@@ -1016,7 +1016,7 @@ export function App() {
         }
       ]);
     }
-    setStockCartQty((prev) => ({ ...prev, [row.batch_id]: "1" }));
+    setStockCartQty((prev) => ({ ...prev, [row.batch_id]: "" }));
     setAppMessage(`${row.drug_name} (batch ${row.batch_no || "-"}) added to cart. Open Transact to finish.`);
   };
 
@@ -1201,27 +1201,46 @@ export function App() {
 
                 <section className="alert-strip">
                   <div className={`alert-chip ${lowStockUnique.length > 0 ? "alert-chip-warn" : ""}`}>
-                    Low stock: {lowStockUnique.length}
+                    <p className="alert-chip-title">Low stock: {lowStockUnique.length}</p>
                     {lowStockUnique.length > 0 ? (
-                      <span className="alert-chip-names">
-                        {lowStockUnique.map((i) => `${i.drug_name}${i.batch_no ? ` · ${i.batch_no}` : ""}`).join(", ")}
-                      </span>
-                    ) : null}
+                      <ul className="alert-chip-list">
+                        {lowStockUnique.map((i) => (
+                          <li key={`low-${i.batch_id || i.drug_id}`}>
+                            {i.drug_name}
+                            {i.batch_no ? <span className="alert-batch">{i.batch_no}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="alert-chip-empty">None</p>
+                    )}
                   </div>
                   <div className={`alert-chip ${nearExpiryItems.length > 0 ? "alert-chip-expiry" : ""}`}>
-                    Expiring in 3 months: {nearExpiryItems.length}
+                    <p className="alert-chip-title">Expiring in 3 months: {nearExpiryItems.length}</p>
                     {nearExpiryItems.length > 0 ? (
-                      <span className="alert-chip-names">
-                        {nearExpiryItems.map((i) => `${i.drug_name}${i.batch_no ? ` · ${i.batch_no}` : ""}`).join(", ")}
-                      </span>
-                    ) : null}
+                      <ul className="alert-chip-list">
+                        {nearExpiryItems.map((i) => (
+                          <li key={`exp-${i.batch_id || i.drug_id}`}>
+                            {i.drug_name}
+                            {i.batch_no ? <span className="alert-batch">{i.batch_no}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="alert-chip-empty">None</p>
+                    )}
                   </div>
                   {expiredItems.length > 0 ? (
                     <div className="alert-chip alert-chip-expired">
-                      Expired: {expiredItems.length}
-                      <span className="alert-chip-names">
-                        {expiredItems.map((i) => `${i.drug_name}${i.batch_no ? ` · ${i.batch_no}` : ""}`).join(", ")}
-                      </span>
+                      <p className="alert-chip-title">Expired: {expiredItems.length}</p>
+                      <ul className="alert-chip-list">
+                        {expiredItems.map((i) => (
+                          <li key={`gone-${i.batch_id || i.drug_id}`}>
+                            {i.drug_name}
+                            {i.batch_no ? <span className="alert-batch">{i.batch_no}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   ) : null}
                 </section>
@@ -1234,6 +1253,7 @@ export function App() {
                     </button>
                   </div>
                   <input
+                    className="stock-search"
                     placeholder="Search medicine..."
                     value={stockSearch}
                     onChange={(e) => setStockSearch(e.target.value)}
@@ -1361,7 +1381,8 @@ export function App() {
                                   className="stock-cart-qty"
                                   type="number"
                                   min="1"
-                                  value={stockCartQty[s.batch_id] ?? "1"}
+                                  placeholder="Qty"
+                                  value={stockCartQty[s.batch_id] ?? ""}
                                   onChange={(e) =>
                                     setStockCartQty({ ...stockCartQty, [s.batch_id]: e.target.value })
                                   }

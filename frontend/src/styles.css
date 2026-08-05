@@ -271,27 +271,54 @@ button:disabled {
 }
 
 .alert-chip {
-  flex: 1 1 280px;
+  flex: 1 1 320px;
   max-width: 100%;
   padding: 10px 14px;
   border-radius: 12px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
-  font-size: 15px;
-  font-weight: 700;
   color: #0f172a;
   line-height: 1.4;
 }
 
-.alert-chip-names {
-  display: block;
-  margin-top: 4px;
-  font-weight: 500;
+.alert-chip-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.alert-chip-empty {
+  margin: 0;
   font-size: 14px;
-  color: #334155;
-  white-space: normal;
-  overflow: visible;
-  text-overflow: unset;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.alert-chip-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 12px;
+  max-height: 160px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.alert-chip-list li {
+  padding: 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.alert-batch {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
 }
 
 .alert-chip-warn {
@@ -362,6 +389,13 @@ button:disabled {
 
 .stock-toolbar button {
   margin: 0;
+}
+
+.stock-search {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0 12px;
 }
 
 .sale-search-wrap {
