@@ -444,18 +444,21 @@ def stock_levels(db: Session = Depends(get_db), user: User = Depends(require_rol
             is_near_expiry = not is_expired and nearest_expiry <= warning_cutoff
         qty = int(r.quantity_available or 0)
         total_for_drug = int(drug_totals.get(r.id, 0))
+        units_per_purchase = int(r.units_per_purchase or 1)
+        # reorder_level is entered in packets/bottles (purchase units)
+        qty_purchase = qty / units_per_purchase if units_per_purchase > 1 else qty
         result.append(
             {
                 "drug_id": r.id,
                 "drug_name": r.name,
                 "unit": r.unit,
                 "purchase_unit": r.purchase_unit,
-                "units_per_purchase": int(r.units_per_purchase or 1),
+                "units_per_purchase": units_per_purchase,
                 "total_quantity": qty if r.batch_id else total_for_drug,
                 "unit_price": float(r.selling_price or 0),
                 "unit_cost": float(r.unit_cost or 0),
                 "reorder_level": r.reorder_level,
-                "is_low_stock": qty <= r.reorder_level,
+                "is_low_stock": qty_purchase <= r.reorder_level,
                 "nearest_expiry": nearest_expiry,
                 "days_to_expiry": days_to_expiry,
                 "is_near_expiry": is_near_expiry,
@@ -712,12 +715,32 @@ def get_sale(sale_id: int, db: Session = Depends(get_db), user: User = Depends(r
 @router.get("/reports/low-stock")
 def low_stock_report(db: Session = Depends(get_db), user: User = Depends(require_roles("Admin"))):
     rows = db.execute(
-        select(Drug.id, Drug.name, func.coalesce(func.sum(Batch.quantity_available), 0).label("qty"), Drug.reorder_level)
+        select(
+            Drug.id,
+            Drug.name,
+            Drug.units_per_purchase,
+            Drug.reorder_level,
+            func.coalesce(func.sum(Batch.quantity_available), 0).label("qty"),
+        )
         .join(Batch, Batch.drug_id == Drug.id, isouter=True)
         .group_by(Drug.id)
-        .having(func.coalesce(func.sum(Batch.quantity_available), 0) <= Drug.reorder_level)
     ).all()
-    return [{"drug_id": r.id, "drug_name": r.name, "current_quantity": int(r.qty or 0), "reorder_level": r.reorder_level} for r in rows]
+    result = []
+    for r in rows:
+        units = int(r.units_per_purchase or 1)
+        qty = int(r.qty or 0)
+        qty_purchase = qty / units if units > 1 else qty
+        if qty_purchase <= r.reorder_level:
+            result.append(
+                {
+                    "drug_id": r.id,
+                    "drug_name": r.name,
+                    "current_quantity": qty,
+                    "current_quantity_purchase": qty_purchase,
+                    "reorder_level": r.reorder_level,
+                }
+            )
+    return result
 
 
 @router.get("/users")

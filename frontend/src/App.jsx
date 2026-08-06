@@ -1310,7 +1310,7 @@ export function App() {
                         <th>Buying Price</th>
                         <th>Selling Price</th>
                         <th>Expiry date</th>
-                        <th>Min stock</th>
+                        <th>Min stock (pkts/btls)</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
@@ -1495,12 +1495,6 @@ export function App() {
                     </ul>
                   ) : null}
                 </label>
-                {medicineForm.existing_drug_id ? (
-                  <p className="sales-helper-text">
-                    Existing medicine linked. Fill <strong>new</strong> batch number, expiry, and quantity — this adds
-                    another batch, it does not replace the old one.
-                  </p>
-                ) : null}
                 <label>
                   Batch number
                   <input
@@ -1570,7 +1564,7 @@ export function App() {
                   />
                 </label>
                 <label>
-                  Minimum stock level
+                  Minimum stock level (packets/bottles)
                   <input
                     type="number"
                     min="0"
