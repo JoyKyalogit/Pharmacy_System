@@ -203,6 +203,8 @@ export function App() {
   const [savingNameUserId, setSavingNameUserId] = useState(null);
   const [medicineForm, setMedicineForm] = useState({ ...EMPTY_MEDICINE_FORM });
   const [stockCartQty, setStockCartQty] = useState({});
+  const [medicineSuggestions, setMedicineSuggestions] = useState([]);
+  const [showMedicineSuggestions, setShowMedicineSuggestions] = useState(false);
   const [saleForm, setSaleForm] = useState({
     quantity: 1,
     quantity_unit: "base",
@@ -523,10 +525,39 @@ export function App() {
     return tabletsPerPacket > 0 ? tabletsPerPacket : 1;
   };
 
+  const applyExistingMedicine = (match) => {
+    if (!match) return;
+    const hasTablets = match.unit === "tablet" || Number(match.units_per_purchase || 1) > 1;
+    setMedicineForm((prev) => ({
+      ...prev,
+      existing_drug_id: match.drug_id,
+      name: match.drug_name,
+      batch_no: "",
+      expiry_date: "",
+      number_of_packets: "",
+      tablets_per_packet: hasTablets ? String(match.units_per_purchase || "") : "",
+      price_per_tablet:
+        hasTablets && match.last_selling_price != null ? String(match.last_selling_price) : prev.price_per_tablet,
+      price_per_packet:
+        !hasTablets && match.last_selling_price != null ? String(match.last_selling_price) : prev.price_per_packet,
+      buying_price: match.last_unit_cost != null ? String(match.last_unit_cost) : prev.buying_price,
+      reorder_level: String(match.reorder_level ?? prev.reorder_level ?? "10")
+    }));
+    setMedicineSuggestions([]);
+    setShowMedicineSuggestions(false);
+    setAppMessage(`Existing medicine selected. Enter new batch number, expiry, and quantity.`);
+  };
+
   useEffect(() => {
-    if (!token || activePage !== "admin") return undefined;
+    if (!token || activePage !== "admin") {
+      setMedicineSuggestions([]);
+      setShowMedicineSuggestions(false);
+      return undefined;
+    }
     const name = medicineForm.name.trim();
     if (name.length < 2) {
+      setMedicineSuggestions([]);
+      setShowMedicineSuggestions(false);
       if (medicineForm.existing_drug_id) {
         setMedicineForm((prev) => ({ ...prev, existing_drug_id: null }));
       }
@@ -535,34 +566,34 @@ export function App() {
     const timer = setTimeout(async () => {
       try {
         const data = await apiRequest(`/drugs/match?name=${encodeURIComponent(name)}`, "GET", token);
-        const match = data?.match;
-        if (!match) {
-          setMedicineForm((prev) => (prev.existing_drug_id ? { ...prev, existing_drug_id: null } : prev));
+        const suggestions = Array.isArray(data?.suggestions) ? data.suggestions : [];
+        setMedicineSuggestions(suggestions);
+        const typed = name.toLowerCase();
+        const exact = suggestions.find((s) => String(s.drug_name || "").toLowerCase() === typed);
+        if (exact) {
+          if (medicineForm.existing_drug_id !== exact.drug_id) {
+            applyExistingMedicine(exact);
+          } else {
+            setShowMedicineSuggestions(false);
+          }
           return;
         }
-        setMedicineForm((prev) => {
-          if (prev.name.trim().toLowerCase() !== String(match.drug_name || "").toLowerCase()) return prev;
-          if (prev.existing_drug_id === match.drug_id) return prev;
-          const hasTablets = match.unit === "tablet" || Number(match.units_per_purchase || 1) > 1;
-          return {
-            ...prev,
-            existing_drug_id: match.drug_id,
-            name: match.drug_name,
-            tablets_per_packet: hasTablets ? String(match.units_per_purchase || "") : "",
-            price_per_tablet:
-              hasTablets && match.last_selling_price != null ? String(match.last_selling_price) : prev.price_per_tablet,
-            price_per_packet:
-              !hasTablets && match.last_selling_price != null ? String(match.last_selling_price) : prev.price_per_packet,
-            buying_price: match.last_unit_cost != null ? String(match.last_unit_cost) : prev.buying_price,
-            reorder_level: String(match.reorder_level ?? prev.reorder_level)
-          };
-        });
-      } catch {
-        /* ignore lookup failures while typing */
+        if (data?.match && suggestions.length === 1 && medicineForm.existing_drug_id !== data.match.drug_id) {
+          applyExistingMedicine(data.match);
+          return;
+        }
+        setShowMedicineSuggestions(suggestions.length > 0 && !medicineForm.existing_drug_id);
+        if (!suggestions.length && medicineForm.existing_drug_id) {
+          setMedicineForm((prev) => ({ ...prev, existing_drug_id: null }));
+        }
+      } catch (err) {
+        setMedicineSuggestions([]);
+        setShowMedicineSuggestions(false);
+        setAppMessage(`Could not look up existing medicines: ${err.message}`);
       }
-    }, 350);
+    }, 300);
     return () => clearTimeout(timer);
-  }, [medicineForm.name, medicineForm.existing_drug_id, token, activePage]);
+  }, [medicineForm.name, token, activePage]);
 
   const createMedicine = async () => {
     if (!medicineForm.name.trim()) {
@@ -633,6 +664,8 @@ export function App() {
 
       setAppMessage(medicineForm.existing_drug_id ? "New batch added to existing medicine." : "Medicine added.");
       setMedicineForm({ ...EMPTY_MEDICINE_FORM });
+      setMedicineSuggestions([]);
+      setShowMedicineSuggestions(false);
       await loadStock();
     } catch (err) {
       setAppMessage(`Add medicine failed: ${err.message}`);
@@ -805,7 +838,8 @@ export function App() {
       total_quantity: String(drug.total_quantity ?? 0),
       unit_price: String(drug.unit_price ?? 0),
       unit_cost: String(drug.unit_cost ?? 0),
-      nearest_expiry: drug.nearest_expiry || ""
+      nearest_expiry: drug.nearest_expiry || "",
+      reorder_level: String(drug.reorder_level ?? 0)
     });
   };
 
@@ -836,7 +870,15 @@ export function App() {
       }
     }
     try {
-      await apiRequest(`/drugs/${editingStock.drug_id}`, "PUT", token, { name: editingStock.drug_name.trim() });
+      const minStock = Number(editingStock.reorder_level);
+      if (Number.isNaN(minStock) || minStock < 0) {
+        setAppMessage("Minimum stock level must be zero or greater.");
+        return;
+      }
+      await apiRequest(`/drugs/${editingStock.drug_id}`, "PUT", token, {
+        name: editingStock.drug_name.trim(),
+        reorder_level: minStock
+      });
       if (editingStock.batch_id) {
         await apiRequest(`/stock/batches/${editingStock.batch_id}`, "PUT", token, {
           batch_no: editingStock.batch_no.trim(),
@@ -1268,6 +1310,7 @@ export function App() {
                         <th>Buying Price</th>
                         <th>Selling Price</th>
                         <th>Expiry date</th>
+                        <th>Min stock</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
@@ -1361,6 +1404,18 @@ export function App() {
                           </td>
                           <td>
                             {isEditing ? (
+                              <input
+                                type="number"
+                                min="0"
+                                value={editingStock.reorder_level}
+                                onChange={(e) => setEditingStock({ ...editingStock, reorder_level: e.target.value })}
+                              />
+                            ) : (
+                              s.reorder_level ?? 0
+                            )}
+                          </td>
+                          <td>
+                            {isEditing ? (
                               <div className="action-buttons">
                                 <button type="button" onClick={saveEditDrug}>
                                   Save
@@ -1413,20 +1468,43 @@ export function App() {
               <section className="card">
               <h2>Add medicine</h2>
               <div className="grid">
-                <label>
+                <label className="medicine-name-field">
                   Medicine Name
                   <input
                     value={medicineForm.name}
-                    onChange={(e) =>
-                      setMedicineForm({ ...medicineForm, name: e.target.value, existing_drug_id: null })
-                    }
+                    onChange={(e) => {
+                      setMedicineForm({ ...medicineForm, name: e.target.value, existing_drug_id: null });
+                      setShowMedicineSuggestions(true);
+                    }}
+                    onFocus={() => {
+                      if (medicineSuggestions.length > 0 && !medicineForm.existing_drug_id) {
+                        setShowMedicineSuggestions(true);
+                      }
+                    }}
+                    autoComplete="off"
                   />
+                  {showMedicineSuggestions && medicineSuggestions.length > 0 ? (
+                    <ul className="medicine-suggest-dropdown" role="listbox">
+                      {medicineSuggestions.map((item) => (
+                        <li key={item.drug_id}>
+                          <button type="button" onClick={() => applyExistingMedicine(item)}>
+                            {item.drug_name}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </label>
                 {medicineForm.existing_drug_id ? (
                   <p className="sales-helper-text">
-                    Existing medicine found. Batch fields are ready to edit for a new batch.
+                    Existing medicine linked. Fill <strong>new</strong> batch number, expiry, and quantity — this adds
+                    another batch, it does not replace the old one.
                   </p>
-                ) : null}
+                ) : (
+                  <p className="sales-helper-text">
+                    Type a name. If it already exists, pick it from the list, then enter the new batch details.
+                  </p>
+                )}
                 <label>
                   Batch number
                   <input

@@ -398,6 +398,43 @@ button:disabled {
   margin: 8px 0 12px;
 }
 
+.medicine-name-field {
+  position: relative;
+  grid-column: 1 / -1;
+}
+
+.medicine-suggest-dropdown {
+  position: absolute;
+  z-index: 25;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.medicine-suggest-dropdown button {
+  width: 100%;
+  margin: 0;
+  text-align: left;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid transparent;
+  font-weight: 500;
+}
+
+.medicine-suggest-dropdown button:hover {
+  background: #f1f5f9;
+  filter: none;
+}
+
 .sale-search-wrap {
   position: relative;
   grid-column: 1 / -1;

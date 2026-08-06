@@ -166,6 +166,20 @@ def create_drug(
     return {"id": drug.id, "name": drug.name, "sku": drug.sku, "reorder_level": drug.reorder_level, "is_active": drug.is_active}
 
 
+def _drug_match_payload(db: Session, drug: Drug) -> dict:
+    latest_batch = db.scalar(select(Batch).where(Batch.drug_id == drug.id).order_by(Batch.id.desc()))
+    return {
+        "drug_id": drug.id,
+        "drug_name": drug.name,
+        "unit": drug.unit,
+        "purchase_unit": drug.purchase_unit,
+        "units_per_purchase": int(drug.units_per_purchase or 1),
+        "reorder_level": int(drug.reorder_level or 0),
+        "last_selling_price": float(latest_batch.selling_price) if latest_batch else None,
+        "last_unit_cost": float(latest_batch.unit_cost) if latest_batch else None,
+    }
+
+
 @router.get("/drugs/match")
 def match_drug_by_name(
     name: str = Query(..., min_length=1),
@@ -174,27 +188,23 @@ def match_drug_by_name(
 ):
     term = name.strip()
     if not term:
-        return {"match": None}
-    drug = db.scalar(
+        return {"match": None, "suggestions": []}
+
+    exact = db.scalar(
         select(Drug)
         .where(Drug.is_active.is_(True), func.lower(Drug.name) == term.lower())
         .order_by(Drug.id.asc())
     )
-    if not drug:
-        return {"match": None}
-    latest_batch = db.scalar(select(Batch).where(Batch.drug_id == drug.id).order_by(Batch.id.desc()))
-    return {
-        "match": {
-            "drug_id": drug.id,
-            "drug_name": drug.name,
-            "unit": drug.unit,
-            "purchase_unit": drug.purchase_unit,
-            "units_per_purchase": int(drug.units_per_purchase or 1),
-            "reorder_level": int(drug.reorder_level or 0),
-            "last_selling_price": float(latest_batch.selling_price) if latest_batch else None,
-            "last_unit_cost": float(latest_batch.unit_cost) if latest_batch else None,
-        }
-    }
+    search_term = f"%{term}%"
+    candidates = db.scalars(
+        select(Drug)
+        .where(Drug.is_active.is_(True), Drug.name.ilike(search_term))
+        .order_by(Drug.name.asc())
+        .limit(12)
+    ).all()
+    suggestions = [_drug_match_payload(db, d) for d in candidates]
+    match = _drug_match_payload(db, exact) if exact else (suggestions[0] if len(suggestions) == 1 else None)
+    return {"match": match, "suggestions": suggestions}
 
 
 @router.get("/drugs/search")
