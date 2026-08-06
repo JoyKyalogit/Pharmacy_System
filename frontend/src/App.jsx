@@ -1500,11 +1500,7 @@ export function App() {
                     Existing medicine linked. Fill <strong>new</strong> batch number, expiry, and quantity — this adds
                     another batch, it does not replace the old one.
                   </p>
-                ) : (
-                  <p className="sales-helper-text">
-                    Type a name. If it already exists, pick it from the list, then enter the new batch details.
-                  </p>
-                )}
+                ) : null}
                 <label>
                   Batch number
                   <input
