@@ -49,16 +49,41 @@ const PHARMACY_PO_BOX = "P.O BOX 135590100 MKS";
 const PHARMACY_TELEPHONE = "Telephone:0757902973";
 const EMPTY_MEDICINE_FORM = {
   name: "",
+  base_unit: "tablet",
   batch_no: "",
   number_of_packets: "",
   tablets_per_packet: "",
+  quantity: "",
   price_per_packet: "",
   price_per_tablet: "",
+  selling_price: "",
   buying_price: "",
   expiry_date: "",
   reorder_level: "10",
   existing_drug_id: null
 };
+
+const BASE_UNITS = [
+  { value: "tablet", label: "Tablets" },
+  { value: "capsule", label: "Capsules" },
+  { value: "piece", label: "Pieces" },
+  { value: "tube", label: "Tube" }
+];
+
+function normalizeBaseUnit(unit) {
+  const u = String(unit || "").trim().toLowerCase();
+  if (u === "tablet" || u === "tablets") return "tablet";
+  if (u === "capsule" || u === "capsules") return "capsule";
+  if (u === "piece" || u === "pieces") return "piece";
+  if (u === "tube" || u === "tubes") return "tube";
+  if (u === "bottle") return "piece";
+  return "tablet";
+}
+
+function baseUnitLabel(unit) {
+  const found = BASE_UNITS.find((b) => b.value === normalizeBaseUnit(unit));
+  return found ? found.label.toLowerCase() : "units";
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -520,32 +545,140 @@ export function App() {
     loadUsers();
   }, [activePage, token, isAdminSession]);
 
-  const computeUnitsPerPurchase = () => {
-    const tabletsPerPacket = Number(medicineForm.tablets_per_packet || 0);
-    return tabletsPerPacket > 0 ? tabletsPerPacket : 1;
-  };
-
   const applyExistingMedicine = (match) => {
     if (!match) return;
-    const hasTablets = match.unit === "tablet" || Number(match.units_per_purchase || 1) > 1;
+    const baseUnit = normalizeBaseUnit(match.unit);
+    const isTablet = baseUnit === "tablet" || Number(match.units_per_purchase || 1) > 1;
     setMedicineForm((prev) => ({
       ...prev,
       existing_drug_id: match.drug_id,
       name: match.drug_name,
+      base_unit: isTablet ? "tablet" : baseUnit,
       batch_no: "",
       expiry_date: "",
       number_of_packets: "",
-      tablets_per_packet: hasTablets ? String(match.units_per_purchase || "") : "",
+      quantity: "",
+      tablets_per_packet: isTablet ? String(match.units_per_purchase || "") : "",
       price_per_tablet:
-        hasTablets && match.last_selling_price != null ? String(match.last_selling_price) : prev.price_per_tablet,
-      price_per_packet:
-        !hasTablets && match.last_selling_price != null ? String(match.last_selling_price) : prev.price_per_packet,
+        isTablet && match.last_selling_price != null ? String(match.last_selling_price) : "",
+      selling_price:
+        !isTablet && match.last_selling_price != null ? String(match.last_selling_price) : "",
+      price_per_packet: "",
       buying_price: match.last_unit_cost != null ? String(match.last_unit_cost) : prev.buying_price,
       reorder_level: String(match.reorder_level ?? prev.reorder_level ?? "10")
     }));
     setMedicineSuggestions([]);
     setShowMedicineSuggestions(false);
-    setAppMessage(`Existing medicine selected. Enter new batch number, expiry, and quantity.`);
+  };
+
+  const createMedicine = async () => {
+    if (!medicineForm.name.trim()) {
+      setAppMessage("Medicine name is required.");
+      return;
+    }
+    if (!medicineForm.batch_no.trim()) {
+      setAppMessage("Batch number is required.");
+      return;
+    }
+    if (!medicineForm.expiry_date) {
+      setAppMessage("Expiry date is required. Medicine was not added.");
+      return;
+    }
+    if (medicineForm.buying_price === "" || Number(medicineForm.buying_price) < 0) {
+      setAppMessage("Buying price is required.");
+      return;
+    }
+    const minStock = Number(medicineForm.reorder_level);
+    if (Number.isNaN(minStock) || minStock < 0) {
+      setAppMessage("Minimum stock level must be zero or greater.");
+      return;
+    }
+    const baseUnit = normalizeBaseUnit(medicineForm.base_unit);
+    const isTablet = baseUnit === "tablet";
+    let quantityPurchase = 0;
+    let quantityBase = 0;
+    let sellingPrice = 0;
+    let unitsPerPurchase = 1;
+    let purchaseUnit = baseUnit;
+
+    if (isTablet) {
+      if (!medicineForm.number_of_packets || Number(medicineForm.number_of_packets) <= 0) {
+        setAppMessage("Number of packets must be greater than zero.");
+        return;
+      }
+      const tabletsPerPacket = Number(medicineForm.tablets_per_packet || 0);
+      if (!tabletsPerPacket || tabletsPerPacket <= 0) {
+        setAppMessage("Number of tablets per packet must be greater than zero.");
+        return;
+      }
+      if (!medicineForm.price_per_tablet || Number(medicineForm.price_per_tablet) <= 0) {
+        setAppMessage("Selling price per tablet must be greater than zero.");
+        return;
+      }
+      quantityPurchase = Number(medicineForm.number_of_packets);
+      unitsPerPurchase = tabletsPerPacket;
+      purchaseUnit = "packet";
+      sellingPrice = Number(medicineForm.price_per_tablet);
+    } else {
+      if (!medicineForm.quantity || Number(medicineForm.quantity) <= 0) {
+        setAppMessage(`Quantity (${baseUnitLabel(baseUnit)}) must be greater than zero.`);
+        return;
+      }
+      if (!medicineForm.selling_price || Number(medicineForm.selling_price) <= 0) {
+        setAppMessage(`Selling price per ${baseUnitLabel(baseUnit)} must be greater than zero.`);
+        return;
+      }
+      quantityBase = Number(medicineForm.quantity);
+      unitsPerPurchase = 1;
+      purchaseUnit = baseUnit;
+      sellingPrice = Number(medicineForm.selling_price);
+    }
+
+    setIsSubmittingDrug(true);
+    try {
+      let drugId = medicineForm.existing_drug_id;
+      if (drugId) {
+        await apiRequest(`/drugs/${drugId}`, "PUT", token, { reorder_level: minStock });
+      } else {
+        const sku = `${medicineForm.name.replace(/\s+/g, "-").toUpperCase()}-${Date.now().toString().slice(-5)}`;
+        const createdDrug = await apiRequest("/drugs", "POST", token, {
+          name: medicineForm.name.trim(),
+          sku,
+          unit: isTablet ? "tablet" : baseUnit,
+          purchase_unit: purchaseUnit,
+          units_per_purchase: unitsPerPurchase,
+          category: "General",
+          reorder_level: minStock,
+          is_prescription_required: false
+        });
+        drugId = createdDrug.id;
+      }
+
+      const batchPayload = {
+        drug_id: drugId,
+        supplier_id: null,
+        batch_no: medicineForm.batch_no.trim(),
+        expiry_date: medicineForm.expiry_date,
+        unit_cost: Number(medicineForm.buying_price),
+        selling_price: sellingPrice
+      };
+      if (isTablet) {
+        batchPayload.quantity_received_purchase = quantityPurchase;
+      } else {
+        batchPayload.quantity_received = quantityBase;
+      }
+      await apiRequest("/stock/batches", "POST", token, batchPayload);
+
+      setAppMessage(medicineForm.existing_drug_id ? "New batch added to existing medicine." : "Medicine added.");
+      setMedicineForm({ ...EMPTY_MEDICINE_FORM });
+      setMedicineSuggestions([]);
+      setShowMedicineSuggestions(false);
+      await loadStock();
+    } catch (err) {
+      setAppMessage(`Add medicine failed: ${err.message}`);
+    } finally {
+      setIsSubmittingDrug(false);
+    }
   };
 
   useEffect(() => {
@@ -594,85 +727,6 @@ export function App() {
     }, 300);
     return () => clearTimeout(timer);
   }, [medicineForm.name, token, activePage]);
-
-  const createMedicine = async () => {
-    if (!medicineForm.name.trim()) {
-      setAppMessage("Medicine name is required.");
-      return;
-    }
-    if (!medicineForm.batch_no.trim()) {
-      setAppMessage("Batch number is required.");
-      return;
-    }
-    if (!medicineForm.expiry_date) {
-      setAppMessage("Expiry date is required. Medicine was not added.");
-      return;
-    }
-    if (!medicineForm.number_of_packets || Number(medicineForm.number_of_packets) <= 0) {
-      setAppMessage("Number of packets must be greater than zero.");
-      return;
-    }
-    if (medicineForm.buying_price === "" || Number(medicineForm.buying_price) < 0) {
-      setAppMessage("Buying price is required.");
-      return;
-    }
-    const minStock = Number(medicineForm.reorder_level);
-    if (Number.isNaN(minStock) || minStock < 0) {
-      setAppMessage("Minimum stock level must be zero or greater.");
-      return;
-    }
-    const tabletsPerPacket = Number(medicineForm.tablets_per_packet || 0);
-    const hasTablets = tabletsPerPacket > 0;
-    if (hasTablets) {
-      if (!medicineForm.price_per_tablet || Number(medicineForm.price_per_tablet) <= 0) {
-        setAppMessage("Selling price per tablet must be greater than zero.");
-        return;
-      }
-    } else if (!medicineForm.price_per_packet || Number(medicineForm.price_per_packet) <= 0) {
-      setAppMessage("Selling price per bottle must be greater than zero.");
-      return;
-    }
-    setIsSubmittingDrug(true);
-    try {
-      let drugId = medicineForm.existing_drug_id;
-      if (drugId) {
-        await apiRequest(`/drugs/${drugId}`, "PUT", token, { reorder_level: minStock });
-      } else {
-        const sku = `${medicineForm.name.replace(/\s+/g, "-").toUpperCase()}-${Date.now().toString().slice(-5)}`;
-        const createdDrug = await apiRequest("/drugs", "POST", token, {
-          name: medicineForm.name.trim(),
-          sku,
-          unit: hasTablets ? "tablet" : "bottle",
-          purchase_unit: hasTablets ? "packet" : "bottle",
-          units_per_purchase: computeUnitsPerPurchase(),
-          category: "General",
-          reorder_level: minStock,
-          is_prescription_required: false
-        });
-        drugId = createdDrug.id;
-      }
-
-      await apiRequest("/stock/batches", "POST", token, {
-        drug_id: drugId,
-        supplier_id: null,
-        batch_no: medicineForm.batch_no.trim(),
-        expiry_date: medicineForm.expiry_date,
-        quantity_received_purchase: Number(medicineForm.number_of_packets),
-        unit_cost: Number(medicineForm.buying_price),
-        selling_price: hasTablets ? Number(medicineForm.price_per_tablet) : Number(medicineForm.price_per_packet)
-      });
-
-      setAppMessage(medicineForm.existing_drug_id ? "New batch added to existing medicine." : "Medicine added.");
-      setMedicineForm({ ...EMPTY_MEDICINE_FORM });
-      setMedicineSuggestions([]);
-      setShowMedicineSuggestions(false);
-      await loadStock();
-    } catch (err) {
-      setAppMessage(`Add medicine failed: ${err.message}`);
-    } finally {
-      setIsSubmittingDrug(false);
-    }
-  };
 
   const submitSale = async () => {
     if (isSubmittingSale) return;
@@ -1250,6 +1304,15 @@ export function App() {
                           <li key={`low-${i.batch_id || i.drug_id}`}>
                             {i.drug_name}
                             {i.batch_no ? <span className="alert-batch">{i.batch_no}</span> : null}
+                            <span className="alert-qty">
+                              {formatDisplayQuantity(
+                                i.total_quantity,
+                                i.unit,
+                                i.purchase_unit,
+                                i.units_per_purchase
+                              )}{" "}
+                              left
+                            </span>
                           </li>
                         ))}
                       </ul>
@@ -1265,6 +1328,15 @@ export function App() {
                           <li key={`exp-${i.batch_id || i.drug_id}`}>
                             {i.drug_name}
                             {i.batch_no ? <span className="alert-batch">{i.batch_no}</span> : null}
+                            <span className="alert-qty">
+                              {formatDisplayQuantity(
+                                i.total_quantity,
+                                i.unit,
+                                i.purchase_unit,
+                                i.units_per_purchase
+                              )}{" "}
+                              · exp {i.nearest_expiry}
+                            </span>
                           </li>
                         ))}
                       </ul>
@@ -1280,6 +1352,15 @@ export function App() {
                           <li key={`gone-${i.batch_id || i.drug_id}`}>
                             {i.drug_name}
                             {i.batch_no ? <span className="alert-batch">{i.batch_no}</span> : null}
+                            <span className="alert-qty">
+                              {formatDisplayQuantity(
+                                i.total_quantity,
+                                i.unit,
+                                i.purchase_unit,
+                                i.units_per_purchase
+                              )}{" "}
+                              · expired {i.nearest_expiry}
+                            </span>
                           </li>
                         ))}
                       </ul>
@@ -1496,64 +1577,124 @@ export function App() {
                   ) : null}
                 </label>
                 <label>
+                  Base Unit
+                  <select
+                    value={medicineForm.base_unit}
+                    onChange={(e) =>
+                      setMedicineForm({
+                        ...medicineForm,
+                        base_unit: e.target.value,
+                        number_of_packets: "",
+                        tablets_per_packet: "",
+                        quantity: "",
+                        price_per_tablet: "",
+                        price_per_packet: "",
+                        selling_price: ""
+                      })
+                    }
+                    disabled={Boolean(medicineForm.existing_drug_id)}
+                  >
+                    {BASE_UNITS.map((u) => (
+                      <option key={u.value} value={u.value}>
+                        {u.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
                   Batch number
                   <input
                     value={medicineForm.batch_no}
                     onChange={(e) => setMedicineForm({ ...medicineForm, batch_no: e.target.value })}
                   />
                 </label>
-                <label>
-                  Number of packets
-                  <input
-                    type="number"
-                    value={medicineForm.number_of_packets}
-                    onChange={(e) => setMedicineForm({ ...medicineForm, number_of_packets: e.target.value })}
-                  />
-                </label>
-                <label>
-                  Number of tablets per packet
-                  <input
-                    type="number"
-                    value={medicineForm.tablets_per_packet}
-                    onChange={(e) => setMedicineForm({ ...medicineForm, tablets_per_packet: e.target.value })}
-                  />
-                </label>
-                <label>
-                  Selling price per tablet
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={medicineForm.price_per_tablet}
-                    onChange={(e) => setMedicineForm({ ...medicineForm, price_per_tablet: e.target.value })}
-                  />
-                </label>
-                <label>
-                  {Number(medicineForm.tablets_per_packet || 0) > 0 ? "Selling price per packet" : "Selling price per bottle"}
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={
-                      Number(medicineForm.tablets_per_packet || 0) > 0 &&
-                      Number(medicineForm.price_per_tablet || 0) > 0
-                        ? (Number(medicineForm.price_per_tablet) * Number(medicineForm.tablets_per_packet)).toFixed(2)
-                        : medicineForm.price_per_packet
-                    }
-                    onChange={(e) => setMedicineForm({ ...medicineForm, price_per_packet: e.target.value })}
-                    disabled={Number(medicineForm.tablets_per_packet || 0) > 0}
-                  />
-                </label>
-                <label>
-                  Buying Price
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={medicineForm.buying_price}
-                    onChange={(e) => setMedicineForm({ ...medicineForm, buying_price: e.target.value })}
-                  />
-                </label>
+                {medicineForm.base_unit === "tablet" ? (
+                  <>
+                    <label>
+                      Number of packets
+                      <input
+                        type="number"
+                        value={medicineForm.number_of_packets}
+                        onChange={(e) => setMedicineForm({ ...medicineForm, number_of_packets: e.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Number of tablets per packet
+                      <input
+                        type="number"
+                        value={medicineForm.tablets_per_packet}
+                        onChange={(e) => setMedicineForm({ ...medicineForm, tablets_per_packet: e.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Selling price per tablet
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={medicineForm.price_per_tablet}
+                        onChange={(e) => setMedicineForm({ ...medicineForm, price_per_tablet: e.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Selling price per packet
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={
+                          Number(medicineForm.tablets_per_packet || 0) > 0 &&
+                          Number(medicineForm.price_per_tablet || 0) > 0
+                            ? (Number(medicineForm.price_per_tablet) * Number(medicineForm.tablets_per_packet)).toFixed(2)
+                            : medicineForm.price_per_packet
+                        }
+                        disabled
+                      />
+                    </label>
+                    <label>
+                      Buying price
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={medicineForm.buying_price}
+                        onChange={(e) => setMedicineForm({ ...medicineForm, buying_price: e.target.value })}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <label>
+                      Quantity ({baseUnitLabel(medicineForm.base_unit)})
+                      <input
+                        type="number"
+                        min="1"
+                        value={medicineForm.quantity}
+                        onChange={(e) => setMedicineForm({ ...medicineForm, quantity: e.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Buying price per {baseUnitLabel(medicineForm.base_unit)}
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={medicineForm.buying_price}
+                        onChange={(e) => setMedicineForm({ ...medicineForm, buying_price: e.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Selling price per {baseUnitLabel(medicineForm.base_unit)}
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={medicineForm.selling_price}
+                        onChange={(e) => setMedicineForm({ ...medicineForm, selling_price: e.target.value })}
+                      />
+                    </label>
+                  </>
+                )}
                 <label>
                   Expiry Date
                   <input
@@ -1564,7 +1705,9 @@ export function App() {
                   />
                 </label>
                 <label>
-                  Minimum stock level (packets/bottles)
+                  {medicineForm.base_unit === "tablet"
+                    ? "Minimum stock level (packets)"
+                    : `Minimum stock level (${baseUnitLabel(medicineForm.base_unit)})`}
                   <input
                     type="number"
                     min="0"

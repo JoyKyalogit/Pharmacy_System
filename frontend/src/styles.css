@@ -321,6 +321,14 @@ button:disabled {
   color: #475569;
 }
 
+.alert-qty {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
 .alert-chip-warn {
   background: #fff7e8;
   border-color: #f7b955;
