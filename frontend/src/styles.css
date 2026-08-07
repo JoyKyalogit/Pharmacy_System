@@ -1,16 +1,29 @@
+html {
+  height: 100%;
+}
+
 body {
   margin: 0;
+  min-height: 100%;
   font-family: "Inter", "Segoe UI", Arial, sans-serif;
   font-size: 17px;
   line-height: 1.5;
   background: linear-gradient(180deg, #d6d9df 0%, #e5e7eb 45%, #f1f3f5 100%);
+  background-attachment: fixed;
   color: #0f172a;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 .container {
-  max-width: 1400px;
+  max-width: 1680px;
+  width: 100%;
   margin: 20px auto;
-  padding: 0 18px 20px;
+  padding: 0 20px 28px;
 }
 
 h1 {
@@ -36,6 +49,8 @@ h3 {
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
   padding: 22px;
   margin-bottom: 18px;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 input,
@@ -295,10 +310,11 @@ button:disabled {
 }
 
 .alert-chip-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   max-height: 160px;
+  overflow-x: auto;
   overflow-y: auto;
   margin: 0;
   padding: 0;
@@ -311,7 +327,7 @@ button:disabled {
   font-weight: 600;
   color: #1e293b;
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .alert-batch {
@@ -346,20 +362,54 @@ button:disabled {
 }
 
 .stock-cart-qty {
-  width: 72px;
-  min-width: 72px;
+  width: 64px;
+  min-width: 64px;
   margin: 0;
-  padding: 8px 10px;
+  padding: 8px 8px;
 }
 
 .stock-row-actions {
   flex-wrap: nowrap;
   white-space: nowrap;
+  gap: 6px;
+}
+
+.stock-row-actions button {
+  padding: 8px 10px;
+  font-size: 14px;
 }
 
 .btn-add-to-cart {
   white-space: nowrap;
   min-width: max-content;
+}
+
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  margin-top: 8px;
+  background: #ffffff;
+}
+
+.table-scroll table {
+  margin-top: 0;
+  border-radius: 0;
+  min-width: 1120px;
+}
+
+.stock-table th,
+.stock-table td {
+  padding: 10px 12px;
+  vertical-align: middle;
+}
+
+.stock-table th:last-child,
+.stock-table td:last-child {
+  white-space: nowrap;
 }
 
 .sale-actions {

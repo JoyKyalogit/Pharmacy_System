@@ -1567,7 +1567,8 @@ export function App() {
                     value={stockSearch}
                     onChange={(e) => setStockSearch(e.target.value)}
                   />
-                  <table>
+                  <div className="table-scroll">
+                  <table className="stock-table">
                     <thead>
                       <tr>
                         <th>Drug</th>
@@ -1735,6 +1736,7 @@ export function App() {
                       })}
                     </tbody>
                   </table>
+                  </div>
                 </section>
               </>
             ) : null}
