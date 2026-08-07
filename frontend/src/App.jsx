@@ -121,6 +121,18 @@ function unitNamePlural(unit) {
   return pluralUnit(2, baseUnitLabel(unit));
 }
 
+function formatMinStockLevel(level, unit) {
+  const qty = Number(level ?? 0);
+  if (usesPacketPackaging(unit)) {
+    return `${qty} ${qty === 1 ? "pkt" : "pkts"}`;
+  }
+  const label = baseUnitLabel(unit);
+  if (label === "bottle") {
+    return `${qty} ${qty === 1 ? "btl" : "btls"}`;
+  }
+  return `${qty} ${pluralUnit(qty, label)}`;
+}
+
 function formatAlertStockLine(item) {
   const name = item.drug_name || "";
   const batch = (item.batch_no || "").trim();
@@ -1667,9 +1679,14 @@ export function App() {
                                 min="0"
                                 value={editingStock.reorder_level}
                                 onChange={(e) => setEditingStock({ ...editingStock, reorder_level: e.target.value })}
+                                title={
+                                  usesPacketPackaging(s.unit)
+                                    ? "Minimum stock in packets"
+                                    : `Minimum stock in ${unitNamePlural(s.unit)}`
+                                }
                               />
                             ) : (
-                              s.reorder_level ?? 0
+                              formatMinStockLevel(s.reorder_level, s.unit)
                             )}
                           </td>
                           <td>
