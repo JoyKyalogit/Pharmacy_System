@@ -407,6 +407,10 @@ button:disabled {
   margin: 8px 0 12px;
 }
 
+.qty-display {
+  white-space: nowrap;
+}
+
 .medicine-name-field {
   position: relative;
   grid-column: 1 / -1;
@@ -532,12 +536,35 @@ button:disabled {
   font-size: 15px;
 }
 
+.cart-edit-input {
+  width: 6.5rem;
+  max-width: 100%;
+  box-sizing: border-box;
+  min-height: 2.25rem;
+}
+
 .cash-calculator {
   margin: 12px 0;
   padding: 12px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
+}
+
+.calc-sale-total {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+}
+
+.calc-sale-total .calc-label {
+  font-size: 0.95rem;
+  color: #334155;
+}
+
+.calc-sale-total strong {
+  font-size: 1.15rem;
 }
 
 .cash-calculator p {

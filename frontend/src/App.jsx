@@ -59,7 +59,7 @@ const EMPTY_MEDICINE_FORM = {
   selling_price: "",
   buying_price: "",
   expiry_date: "",
-  reorder_level: "10",
+  reorder_level: "",
   existing_drug_id: null
 };
 
@@ -67,6 +67,7 @@ const BASE_UNITS = [
   { value: "tablet", label: "Tablet" },
   { value: "capsule", label: "Capsule" },
   { value: "piece", label: "Piece" },
+  { value: "bottle", label: "Bottle" },
   { value: "tube", label: "Tube" }
 ];
 
@@ -75,26 +76,56 @@ function normalizeBaseUnit(unit) {
   if (u === "tablet" || u === "tablets") return "tablet";
   if (u === "capsule" || u === "capsules") return "capsule";
   if (u === "piece" || u === "pieces") return "piece";
+  if (u === "bottle" || u === "bottles") return "bottle";
   if (u === "tube" || u === "tubes") return "tube";
-  if (u === "bottle") return "piece";
   return "tablet";
 }
 
 function usesPacketPackaging(unit) {
   const u = normalizeBaseUnit(unit);
-  return u === "tablet" || u === "capsule";
+  return u === "tablet" || u === "capsule" || u === "piece";
 }
 
+const UNIT_FORMS = {
+  tablet: { one: "tablet", other: "tablets" },
+  capsule: { one: "capsule", other: "capsules" },
+  piece: { one: "piece", other: "pieces" },
+  bottle: { one: "bottle", other: "bottles" },
+  tube: { one: "tube", other: "tubes" },
+  packet: { one: "packet", other: "packets" },
+  unit: { one: "unit", other: "units" }
+};
+
 function baseUnitLabel(unit) {
-  const found = BASE_UNITS.find((b) => b.value === normalizeBaseUnit(unit));
-  return found ? found.label.toLowerCase() : "unit";
+  const key = normalizeBaseUnit(unit);
+  return UNIT_FORMS[key]?.one || "unit";
+}
+
+/** Singular/plural from a count: 1 → singular; 0 and 2+ → plural. */
+function pluralUnit(count, singular) {
+  const n = Number(count);
+  const raw = String(singular || "unit").toLowerCase().trim();
+  const key = raw.endsWith("s") && raw !== "piece" ? raw.slice(0, -1) : raw;
+  const forms =
+    UNIT_FORMS[key] ||
+    UNIT_FORMS[normalizeBaseUnit(key)] || {
+      one: key,
+      other: key.endsWith("s") ? key : `${key}s`
+    };
+  if (n === 1) return forms.one;
+  return forms.other;
+}
+
+/** Unit name without a count (labels like "Quantity (tablets)"). */
+function unitNamePlural(unit) {
+  return pluralUnit(2, baseUnitLabel(unit));
 }
 
 function formatAlertStockLine(item) {
   const name = item.drug_name || "";
   const batch = (item.batch_no || "").trim();
   const qty = Number(item.total_quantity || 0);
-  const unit = baseUnitLabel(item.unit);
+  const unit = pluralUnit(qty, baseUnitLabel(item.unit));
   return [name, batch, `${qty} ${unit}`].filter(Boolean).join(" ");
 }
 
@@ -246,6 +277,7 @@ export function App() {
   const [saleForm, setSaleForm] = useState({
     quantity: 1,
     quantity_unit: "base",
+    unit_price: "",
     discount: ""
   });
   const [drugSearch, setDrugSearch] = useState("");
@@ -561,13 +593,12 @@ export function App() {
   const applyExistingMedicine = (match) => {
     if (!match) return;
     const baseUnit = normalizeBaseUnit(match.unit);
-    const packed = usesPacketPackaging(baseUnit) || Number(match.units_per_purchase || 1) > 1;
-    const resolvedUnit = packed && baseUnit === "piece" ? "tablet" : baseUnit;
+    const packed = usesPacketPackaging(baseUnit);
     setMedicineForm((prev) => ({
       ...prev,
       existing_drug_id: match.drug_id,
       name: match.drug_name,
-      base_unit: packed ? (resolvedUnit === "capsule" ? "capsule" : "tablet") : baseUnit,
+      base_unit: baseUnit,
       batch_no: "",
       expiry_date: "",
       number_of_packets: "",
@@ -579,7 +610,7 @@ export function App() {
         !packed && match.last_selling_price != null ? String(match.last_selling_price) : "",
       price_per_packet: "",
       buying_price: match.last_unit_cost != null ? String(match.last_unit_cost) : prev.buying_price,
-      reorder_level: String(match.reorder_level ?? prev.reorder_level ?? "10")
+      reorder_level: match.reorder_level != null ? String(match.reorder_level) : prev.reorder_level
     }));
     setMedicineSuggestions([]);
     setShowMedicineSuggestions(false);
@@ -622,7 +653,7 @@ export function App() {
       }
       const perPacket = Number(medicineForm.tablets_per_packet || 0);
       if (!perPacket || perPacket <= 0) {
-        setAppMessage(`Number of ${baseUnitLabel(baseUnit)} per packet must be greater than zero.`);
+        setAppMessage(`Number of ${unitNamePlural(baseUnit)} per packet must be greater than zero.`);
         return;
       }
       if (!medicineForm.price_per_tablet || Number(medicineForm.price_per_tablet) <= 0) {
@@ -635,7 +666,7 @@ export function App() {
       sellingPrice = Number(medicineForm.price_per_tablet);
     } else {
       if (!medicineForm.quantity || Number(medicineForm.quantity) <= 0) {
-        setAppMessage(`Quantity (${baseUnitLabel(baseUnit)}) must be greater than zero.`);
+        setAppMessage(`Quantity (${unitNamePlural(baseUnit)}) must be greater than zero.`);
         return;
       }
       if (!medicineForm.selling_price || Number(medicineForm.selling_price) <= 0) {
@@ -758,6 +789,24 @@ export function App() {
       if (cart.some((item) => !item.batch_id)) {
         setAppMessage("Each cart item must be a specific batch.");
         return;
+      }
+      for (const item of cart) {
+        const listPrice = Number(item.list_unit_price ?? 0);
+        const unitPrice = Number(item.unit_price);
+        if (Number.isNaN(unitPrice) || unitPrice < listPrice) {
+          setAppMessage("Unit price can only be increased. Use Discount to lower the price.");
+          return;
+        }
+        const discount = Number(item.discount || 0);
+        if (Number.isNaN(discount) || discount < 0) {
+          setAppMessage("Discount cannot be negative.");
+          return;
+        }
+        const gross = Number(item.quantity) * unitPrice;
+        if (discount > gross) {
+          setAppMessage("Discount cannot exceed line total.");
+          return;
+        }
       }
       const items = cart.map((item) => ({
         drug_id: Number(item.drug_id),
@@ -912,9 +961,7 @@ export function App() {
       unit_price: String(drug.unit_price ?? 0),
       unit_cost: String(drug.unit_cost ?? 0),
       nearest_expiry: drug.nearest_expiry || "",
-      reorder_level: String(drug.reorder_level ?? 0),
-      unit: normalizeBaseUnit(drug.unit),
-      units_per_purchase: String(drug.units_per_purchase ?? 1)
+      reorder_level: String(drug.reorder_level ?? 0)
     });
   };
 
@@ -950,23 +997,9 @@ export function App() {
         setAppMessage("Minimum stock level must be zero or greater.");
         return;
       }
-      const baseUnit = normalizeBaseUnit(editingStock.unit);
-      const packed = usesPacketPackaging(baseUnit);
-      let unitsPerPurchase = Number(editingStock.units_per_purchase || 1);
-      if (packed) {
-        if (!unitsPerPurchase || unitsPerPurchase < 1) {
-          setAppMessage(`Units per packet must be at least 1.`);
-          return;
-        }
-      } else {
-        unitsPerPurchase = 1;
-      }
       await apiRequest(`/drugs/${editingStock.drug_id}`, "PUT", token, {
         name: editingStock.drug_name.trim(),
-        reorder_level: minStock,
-        unit: baseUnit,
-        purchase_unit: packed ? "packet" : baseUnit,
-        units_per_purchase: unitsPerPurchase
+        reorder_level: minStock
       });
       if (editingStock.batch_id) {
         await apiRequest(`/stock/batches/${editingStock.batch_id}`, "PUT", token, {
@@ -997,28 +1030,57 @@ export function App() {
 
   const pickDrug = (drug) => {
     setSelectedDrug(drug);
-    setSaleForm((prev) => ({ ...prev, quantity: 1, quantity_unit: "base", discount: "" }));
+    setSaleForm((prev) => ({
+      ...prev,
+      quantity: 1,
+      quantity_unit: "base",
+      unit_price: drug.unit_price != null ? String(drug.unit_price) : "",
+      discount: ""
+    }));
     setDrugSearch(drug.drug_name || "");
     setSearchResults([]);
     setShowSaleSearchDropdown(false);
   };
 
+  const clampSaleUnitPrice = (rawValue, listPrice) => {
+    const min = Number(listPrice || 0);
+    if (rawValue === "" || rawValue === null || rawValue === undefined) {
+      return { value: String(min), blocked: false };
+    }
+    const num = Number(rawValue);
+    if (Number.isNaN(num)) {
+      return { value: String(min), blocked: true };
+    }
+    if (num < min) {
+      return { value: String(min), blocked: true };
+    }
+    return { value: String(rawValue), blocked: false };
+  };
+
   const formatDisplayQuantity = (totalQty, unit, purchaseUnit, unitsPerPurchase) => {
     const baseQty = Number(totalQty || 0);
     const unitLabel = baseUnitLabel(unit);
-    // Tablets/capsules: show base count only (no packet breakdown)
-    if (usesPacketPackaging(unit)) {
-      return `${baseQty} ${unitLabel}`;
-    }
     const packSize = Number(unitsPerPurchase || 1);
-    if (packSize <= 1 || !purchaseUnit) {
-      return `${baseQty} ${unitLabel}`.trim();
+    // Tablets/capsules/pieces: show packet breakdown (pluralized)
+    if (usesPacketPackaging(unit) && packSize > 1) {
+      const packs = Math.floor(baseQty / packSize);
+      const remainder = baseQty % packSize;
+      if (packs > 0 && remainder > 0) {
+        return `${packs} ${pluralUnit(packs, "packet")} + ${remainder} ${pluralUnit(remainder, unitLabel)}`;
+      }
+      if (packs > 0) return `${packs} ${pluralUnit(packs, "packet")}`;
+      return `${remainder} ${pluralUnit(remainder, unitLabel)}`;
+    }
+    if (packSize <= 1 || !purchaseUnit || !usesPacketPackaging(unit)) {
+      return `${baseQty} ${pluralUnit(baseQty, unitLabel)}`.trim();
     }
     const packs = Math.floor(baseQty / packSize);
     const remainder = baseQty % packSize;
-    if (packs > 0 && remainder > 0) return `${packs} ${purchaseUnit} + ${remainder} ${unitLabel}`;
-    if (packs > 0) return `${packs} ${purchaseUnit}`;
-    return `${remainder} ${unitLabel}`;
+    if (packs > 0 && remainder > 0) {
+      return `${packs} ${pluralUnit(packs, purchaseUnit)} + ${remainder} ${pluralUnit(remainder, unitLabel)}`;
+    }
+    if (packs > 0) return `${packs} ${pluralUnit(packs, purchaseUnit)}`;
+    return `${remainder} ${pluralUnit(remainder, unitLabel)}`;
   };
 
   const addCartLine = () => {
@@ -1036,6 +1098,18 @@ export function App() {
       setAppMessage("Discount cannot be negative.");
       return;
     }
+    const listPrice = Number(selectedDrug.unit_price || 0);
+    const priceCheck = clampSaleUnitPrice(saleForm.unit_price, listPrice);
+    if (priceCheck.blocked) {
+      setSaleForm((prev) => ({ ...prev, unit_price: priceCheck.value }));
+      setAppMessage("Unit price can only be increased. Use Discount to lower the price.");
+      return;
+    }
+    const unitPrice = Number(priceCheck.value);
+    if (Number.isNaN(unitPrice) || unitPrice < 0) {
+      setAppMessage("Unit price is invalid.");
+      return;
+    }
     const isPurchaseUnit = saleForm.quantity_unit === "purchase";
     const conversionFactor = Number(selectedDrug.units_per_purchase || 1);
     const qtyInBaseUnit = isPurchaseUnit ? qty * conversionFactor : qty;
@@ -1043,7 +1117,6 @@ export function App() {
       setAppMessage(`Only ${selectedDrug.available_quantity} ${selectedDrug.unit} available in this batch.`);
       return;
     }
-    const unitPrice = Number(selectedDrug.unit_price || 0);
     const gross = qtyInBaseUnit * unitPrice;
     if (discount > gross) {
       setAppMessage("Discount cannot exceed line total.");
@@ -1059,15 +1132,18 @@ export function App() {
         return;
       }
       const newDiscount = Number(updated[existingIndex].discount || 0) + discount;
-      const newGross = newQty * updated[existingIndex].unit_price;
+      const mergedPrice = Math.max(Number(updated[existingIndex].unit_price || 0), unitPrice);
+      const newGross = newQty * mergedPrice;
       if (newDiscount > newGross) {
         setAppMessage("Discount cannot exceed line total.");
         return;
       }
       updated[existingIndex] = {
         ...updated[existingIndex],
-                      quantity: newQty,
-                      quantity_label: String(newQty),
+        quantity: newQty,
+        quantity_label: String(newQty),
+        unit_price: mergedPrice,
+        list_unit_price: Number(updated[existingIndex].list_unit_price ?? listPrice),
         discount: newDiscount,
         line_total: newGross - newDiscount
       };
@@ -1085,12 +1161,13 @@ export function App() {
           quantity: qtyInBaseUnit,
           quantity_label: String(qtyInBaseUnit),
           unit_price: unitPrice,
+          list_unit_price: listPrice,
           discount,
           line_total: gross - discount
         }
       ]);
     }
-    setSaleForm((prev) => ({ ...prev, quantity: 1, quantity_unit: "base", discount: "" }));
+    setSaleForm((prev) => ({ ...prev, quantity: 1, quantity_unit: "base", unit_price: "", discount: "" }));
     setSelectedDrug(null);
     setDrugSearch("");
     setSearchResults([]);
@@ -1131,6 +1208,7 @@ export function App() {
         ...updated[existingIndex],
         quantity: newQty,
         quantity_label: String(newQty),
+        list_unit_price: Number(updated[existingIndex].list_unit_price ?? unitPrice),
         line_total: newQty * updated[existingIndex].unit_price - Number(updated[existingIndex].discount || 0)
       };
       setCart(updated);
@@ -1147,6 +1225,7 @@ export function App() {
           quantity: qty,
           quantity_label: String(qty),
           unit_price: unitPrice,
+          list_unit_price: unitPrice,
           discount: 0,
           line_total: qty * unitPrice
         }
@@ -1154,6 +1233,85 @@ export function App() {
     }
     setStockCartQty((prev) => ({ ...prev, [row.batch_id]: "" }));
     setAppMessage(`${row.drug_name} (batch ${row.batch_no || "-"}) added to cart. Open Transact to finish.`);
+  };
+
+  const updateCartLinePrice = (lineKey, rawValue, { clamp = false } = {}) => {
+    let blockedDecrease = false;
+    setCart((prev) =>
+      prev.map((line) => {
+        if (line.line_key !== lineKey) return line;
+        const listPrice = Number(line.list_unit_price ?? line.unit_price ?? 0);
+        const qty = Number(line.quantity || 0);
+        const discount = Number(line.discount || 0);
+        if (rawValue === "") {
+          if (clamp) {
+            blockedDecrease = true;
+            return {
+              ...line,
+              unit_price: listPrice,
+              line_total: Math.max(0, qty * listPrice - discount)
+            };
+          }
+          return { ...line, unit_price: rawValue };
+        }
+        const num = Number(rawValue);
+        if (Number.isNaN(num)) return line;
+        if (num < listPrice) {
+          if (!clamp) {
+            return { ...line, unit_price: rawValue };
+          }
+          blockedDecrease = true;
+          return {
+            ...line,
+            unit_price: listPrice,
+            line_total: Math.max(0, qty * listPrice - discount)
+          };
+        }
+        const gross = qty * num;
+        return {
+          ...line,
+          unit_price: num,
+          line_total: Math.max(0, gross - Math.min(discount, gross))
+        };
+      })
+    );
+    if (blockedDecrease) {
+      setAppMessage("Unit price can only be increased. Use Discount to lower the price.");
+    }
+  };
+
+  const updateCartLineDiscount = (lineKey, rawValue) => {
+    let message = null;
+    setCart((prev) =>
+      prev.map((line) => {
+        if (line.line_key !== lineKey) return line;
+        if (rawValue === "") {
+          return { ...line, discount: "" };
+        }
+        const num = Number(rawValue);
+        if (Number.isNaN(num) || num < 0) {
+          message = "Discount cannot be negative.";
+          return line;
+        }
+        const qty = Number(line.quantity || 0);
+        const unitPrice = Number(line.unit_price || 0);
+        const gross = qty * unitPrice;
+        if (num > gross) {
+          message = "Discount cannot exceed line total.";
+          return {
+            ...line,
+            discount: gross,
+            line_total: 0
+          };
+        }
+        return {
+          ...line,
+          discount: num,
+          line_total: gross - num
+        };
+      })
+    );
+    if (message) setAppMessage(message);
   };
 
   const removeCartLine = (lineKey) => {
@@ -1166,8 +1324,14 @@ export function App() {
     setAppMessage("Cart cleared.");
   };
 
-  const saleSubtotal = cart.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unit_price), 0);
-  const saleDiscountTotal = cart.reduce((sum, line) => sum + Number(line.discount || 0), 0);
+  const saleSubtotal = cart.reduce((sum, line) => {
+    const price = Number(line.unit_price || 0);
+    return sum + Number(line.quantity) * (Number.isNaN(price) ? 0 : price);
+  }, 0);
+  const saleDiscountTotal = cart.reduce((sum, line) => {
+    const d = Number(line.discount || 0);
+    return sum + (Number.isNaN(d) ? 0 : d);
+  }, 0);
   const saleGrandTotal = Math.max(0, saleSubtotal - saleDiscountTotal);
   const calcChange =
     calcAmountGiven === "" || Number.isNaN(Number(calcAmountGiven))
@@ -1401,8 +1565,7 @@ export function App() {
                         <th>Buying Price</th>
                         <th>Selling Price</th>
                         <th>Expiry date</th>
-                        <th>Base unit</th>
-                        <th>Min stock (pkts/btls)</th>
+                        <th>Minimum stock</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
@@ -1433,7 +1596,7 @@ export function App() {
                               s.batch_no || "-"
                             )}
                           </td>
-                          <td>
+                          <td className="qty-display">
                             {formatDisplayQuantity(
                               isEditing ? editingStock.total_quantity : s.total_quantity,
                               s.unit,
@@ -1451,7 +1614,10 @@ export function App() {
                                 disabled={!editingStock.batch_id}
                               />
                             ) : (
-                              `${Number(s.total_quantity || 0)} ${s.unit || "units"}`
+                              `${Number(s.total_quantity || 0)} ${pluralUnit(
+                                s.total_quantity,
+                                baseUnitLabel(s.unit)
+                              )}`
                             )}
                           </td>
                           <td>
@@ -1492,49 +1658,6 @@ export function App() {
                               />
                             ) : (
                               s.nearest_expiry || "-"
-                            )}
-                          </td>
-                          <td>
-                            {isEditing ? (
-                              <div className="action-buttons">
-                                <select
-                                  value={editingStock.unit}
-                                  onChange={(e) => {
-                                    const next = e.target.value;
-                                    setEditingStock({
-                                      ...editingStock,
-                                      unit: next,
-                                      units_per_purchase: usesPacketPackaging(next)
-                                        ? editingStock.units_per_purchase || "1"
-                                        : "1"
-                                    });
-                                  }}
-                                >
-                                  {BASE_UNITS.map((u) => (
-                                    <option key={u.value} value={u.value}>
-                                      {u.label}
-                                    </option>
-                                  ))}
-                                </select>
-                                {usesPacketPackaging(editingStock.unit) ? (
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    title="Per packet"
-                                    placeholder="Per packet"
-                                    value={editingStock.units_per_purchase}
-                                    onChange={(e) =>
-                                      setEditingStock({ ...editingStock, units_per_purchase: e.target.value })
-                                    }
-                                  />
-                                ) : null}
-                              </div>
-                            ) : (
-                              `${baseUnitLabel(s.unit)}${
-                                usesPacketPackaging(s.unit) && Number(s.units_per_purchase || 1) > 1
-                                  ? ` (${s.units_per_purchase}/packet)`
-                                  : ""
-                              }`
                             )}
                           </td>
                           <td>
@@ -1673,7 +1796,7 @@ export function App() {
                       />
                     </label>
                     <label>
-                      Number of {baseUnitLabel(medicineForm.base_unit)} per packet
+                      Number of {unitNamePlural(medicineForm.base_unit)} per packet
                       <input
                         type="number"
                         value={medicineForm.tablets_per_packet}
@@ -1719,7 +1842,7 @@ export function App() {
                 ) : (
                   <>
                     <label>
-                      Quantity ({baseUnitLabel(medicineForm.base_unit)})
+                      Quantity ({unitNamePlural(medicineForm.base_unit)})
                       <input
                         type="number"
                         min="1"
@@ -1760,8 +1883,8 @@ export function App() {
                 </label>
                 <label>
                   {usesPacketPackaging(medicineForm.base_unit)
-                    ? "Minimum stock level (packet)"
-                    : `Minimum stock level (${baseUnitLabel(medicineForm.base_unit)})`}
+                    ? "Minimum stock level (packets)"
+                    : `Minimum stock level (${unitNamePlural(medicineForm.base_unit)})`}
                   <input
                     type="number"
                     min="0"
@@ -1825,7 +1948,9 @@ export function App() {
                               {index === 0 ? " · Sells first" : ""}
                             </span>
                             <span className="sale-search-option-meta">
-                              {item.available_quantity} {item.unit} @ {Number(item.unit_price).toFixed(2)}
+                              {item.available_quantity}{" "}
+                              {pluralUnit(item.available_quantity, baseUnitLabel(item.unit))} @{" "}
+                              {Number(item.unit_price).toFixed(2)}
                             </span>
                           </button>
                         </li>
@@ -1834,9 +1959,9 @@ export function App() {
                   ) : null}
                 </div>
                 <label>
-                  Quantity (tablets/bottles)
+                  Quantity
                   <input
-                    placeholder="Quantity (tablets/bottles)"
+                    placeholder="Quantity"
                     type="number"
                     ref={saleQtyInputRef}
                     value={saleForm.quantity}
@@ -1849,11 +1974,41 @@ export function App() {
                     }}
                   />
                 </label>
-                <select value={saleForm.quantity_unit} onChange={(e) => setSaleForm({ ...saleForm, quantity_unit: e.target.value })} disabled={!selectedDrug}>
-                  <option value="base">{selectedDrug ? `${selectedDrug.unit} (base unit)` : "Base unit"}</option>
-                  {selectedDrug && Number(selectedDrug.units_per_purchase || 1) > 1 ? <option value="purchase">{selectedDrug.purchase_unit} (pack/box)</option> : null}
+                <select
+                  value={saleForm.quantity_unit}
+                  onChange={(e) => setSaleForm({ ...saleForm, quantity_unit: e.target.value })}
+                  disabled={!selectedDrug}
+                  title="Base unit"
+                >
+                  <option value="base">
+                    {selectedDrug ? unitNamePlural(selectedDrug.unit) : "Base unit"}
+                  </option>
+                  {selectedDrug &&
+                  usesPacketPackaging(selectedDrug.unit) &&
+                  Number(selectedDrug.units_per_purchase || 1) > 1 ? (
+                    <option value="purchase">packets</option>
+                  ) : null}
                 </select>
-                <input placeholder="Unit price (auto)" value={selectedDrug ? selectedDrug.unit_price : ""} disabled />
+                <label>
+                  Unit price (KES)
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Auto from stock"
+                    title="You can only increase unit price. Use Discount to lower the price."
+                    value={selectedDrug ? saleForm.unit_price : ""}
+                    disabled={!selectedDrug}
+                    onChange={(e) => setSaleForm({ ...saleForm, unit_price: e.target.value })}
+                    onBlur={() => {
+                      if (!selectedDrug) return;
+                      const check = clampSaleUnitPrice(saleForm.unit_price, selectedDrug.unit_price);
+                      if (check.blocked) {
+                        setAppMessage("Unit price can only be increased. Use Discount to lower the price.");
+                      }
+                      setSaleForm((prev) => ({ ...prev, unit_price: check.value }));
+                    }}
+                  />
+                </label>
                 <label>
                   Discount (KES)
                   <input
@@ -1866,11 +2021,7 @@ export function App() {
                   />
                 </label>
               </div>
-              <p className="sales-helper-text">
-                {isSearchingDrugs
-                  ? "Searching batches..."
-                  : "Batches are sorted by nearest expiry. Pick the batch to sell, then quantity."}
-              </p>
+              {isSearchingDrugs ? <p className="sales-helper-text">Searching batches...</p> : null}
               <button onClick={addCartLine}>Add to Cart</button>
               <h3>Cart</h3>
               <table>
@@ -1893,9 +2044,32 @@ export function App() {
                       <td>{line.batch_no || "-"}</td>
                       <td>{line.expiry_date || "-"}</td>
                       <td>{line.quantity_label || line.quantity}</td>
-                      <td>{Number(line.unit_price).toFixed(2)}</td>
-                      <td>{Number(line.discount || 0).toFixed(2)}</td>
-                      <td>{Number(line.line_total).toFixed(2)}</td>
+                      <td>
+                        <input
+                          className="cart-edit-input"
+                          type="number"
+                          step="0.01"
+                          value={line.unit_price}
+                          onChange={(e) => updateCartLinePrice(line.line_key, e.target.value)}
+                          onBlur={(e) => updateCartLinePrice(line.line_key, e.target.value, { clamp: true })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="cart-edit-input"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={line.discount}
+                          onChange={(e) => updateCartLineDiscount(line.line_key, e.target.value)}
+                          onBlur={() => {
+                            if (line.discount === "" || Number.isNaN(Number(line.discount))) {
+                              updateCartLineDiscount(line.line_key, "0");
+                            }
+                          }}
+                        />
+                      </td>
+                      <td>{Number(line.line_total || 0).toFixed(2)}</td>
                       <td>
                         <button type="button" onClick={() => removeCartLine(line.line_key)}>
                           Remove
@@ -1911,16 +2085,19 @@ export function App() {
               <div className="cash-calculator">
                 <h3>Change calculator</h3>
                 <div className="grid">
-                  <label>
-                    Sale total (KES)
-                    <input type="number" value={saleGrandTotal.toFixed(2)} disabled />
-                  </label>
+                  <div className="calc-sale-total">
+                    <span className="calc-label">Sale total (KES)</span>
+                    <strong>{saleGrandTotal.toFixed(2)}</strong>
+                  </div>
                   <label>
                     Amount given (KES)
                     <input
                       type="number"
                       step="0.01"
                       min="0"
+                      name="amount-given"
+                      autoComplete="off"
+                      inputMode="decimal"
                       placeholder="Customer paid"
                       value={calcAmountGiven}
                       onChange={(e) => setCalcAmountGiven(e.target.value)}
