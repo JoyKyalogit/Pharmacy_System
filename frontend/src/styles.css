@@ -311,6 +311,7 @@ button:disabled {
   font-weight: 600;
   color: #1e293b;
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  white-space: normal;
 }
 
 .alert-batch {

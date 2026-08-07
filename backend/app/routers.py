@@ -315,6 +315,9 @@ def update_drug(
         "id": drug.id,
         "name": drug.name,
         "sku": drug.sku,
+        "unit": drug.unit,
+        "purchase_unit": drug.purchase_unit,
+        "units_per_purchase": drug.units_per_purchase,
         "reorder_level": drug.reorder_level,
         "is_active": drug.is_active,
     }

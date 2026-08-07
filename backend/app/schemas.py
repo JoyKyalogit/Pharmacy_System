@@ -42,6 +42,9 @@ class DrugCreate(BaseModel):
 class DrugUpdate(BaseModel):
     name: str | None = None
     category: str | None = None
+    unit: str | None = None
+    purchase_unit: str | None = None
+    units_per_purchase: int | None = Field(None, ge=1)
     reorder_level: int | None = Field(None, ge=0)
     is_prescription_required: bool | None = None
     is_active: bool | None = None

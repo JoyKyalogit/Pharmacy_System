@@ -64,9 +64,9 @@ const EMPTY_MEDICINE_FORM = {
 };
 
 const BASE_UNITS = [
-  { value: "tablet", label: "Tablets" },
-  { value: "capsule", label: "Capsules" },
-  { value: "piece", label: "Pieces" },
+  { value: "tablet", label: "Tablet" },
+  { value: "capsule", label: "Capsule" },
+  { value: "piece", label: "Piece" },
   { value: "tube", label: "Tube" }
 ];
 
@@ -80,9 +80,22 @@ function normalizeBaseUnit(unit) {
   return "tablet";
 }
 
+function usesPacketPackaging(unit) {
+  const u = normalizeBaseUnit(unit);
+  return u === "tablet" || u === "capsule";
+}
+
 function baseUnitLabel(unit) {
   const found = BASE_UNITS.find((b) => b.value === normalizeBaseUnit(unit));
-  return found ? found.label.toLowerCase() : "units";
+  return found ? found.label.toLowerCase() : "unit";
+}
+
+function formatAlertStockLine(item) {
+  const name = item.drug_name || "";
+  const batch = (item.batch_no || "").trim();
+  const qty = Number(item.total_quantity || 0);
+  const unit = baseUnitLabel(item.unit);
+  return [name, batch, `${qty} ${unit}`].filter(Boolean).join(" ");
 }
 
 function escapeHtml(value) {
@@ -548,21 +561,22 @@ export function App() {
   const applyExistingMedicine = (match) => {
     if (!match) return;
     const baseUnit = normalizeBaseUnit(match.unit);
-    const isTablet = baseUnit === "tablet" || Number(match.units_per_purchase || 1) > 1;
+    const packed = usesPacketPackaging(baseUnit) || Number(match.units_per_purchase || 1) > 1;
+    const resolvedUnit = packed && baseUnit === "piece" ? "tablet" : baseUnit;
     setMedicineForm((prev) => ({
       ...prev,
       existing_drug_id: match.drug_id,
       name: match.drug_name,
-      base_unit: isTablet ? "tablet" : baseUnit,
+      base_unit: packed ? (resolvedUnit === "capsule" ? "capsule" : "tablet") : baseUnit,
       batch_no: "",
       expiry_date: "",
       number_of_packets: "",
       quantity: "",
-      tablets_per_packet: isTablet ? String(match.units_per_purchase || "") : "",
+      tablets_per_packet: packed ? String(match.units_per_purchase || "") : "",
       price_per_tablet:
-        isTablet && match.last_selling_price != null ? String(match.last_selling_price) : "",
+        packed && match.last_selling_price != null ? String(match.last_selling_price) : "",
       selling_price:
-        !isTablet && match.last_selling_price != null ? String(match.last_selling_price) : "",
+        !packed && match.last_selling_price != null ? String(match.last_selling_price) : "",
       price_per_packet: "",
       buying_price: match.last_unit_cost != null ? String(match.last_unit_cost) : prev.buying_price,
       reorder_level: String(match.reorder_level ?? prev.reorder_level ?? "10")
@@ -594,29 +608,29 @@ export function App() {
       return;
     }
     const baseUnit = normalizeBaseUnit(medicineForm.base_unit);
-    const isTablet = baseUnit === "tablet";
+    const packed = usesPacketPackaging(baseUnit);
     let quantityPurchase = 0;
     let quantityBase = 0;
     let sellingPrice = 0;
     let unitsPerPurchase = 1;
     let purchaseUnit = baseUnit;
 
-    if (isTablet) {
+    if (packed) {
       if (!medicineForm.number_of_packets || Number(medicineForm.number_of_packets) <= 0) {
         setAppMessage("Number of packets must be greater than zero.");
         return;
       }
-      const tabletsPerPacket = Number(medicineForm.tablets_per_packet || 0);
-      if (!tabletsPerPacket || tabletsPerPacket <= 0) {
-        setAppMessage("Number of tablets per packet must be greater than zero.");
+      const perPacket = Number(medicineForm.tablets_per_packet || 0);
+      if (!perPacket || perPacket <= 0) {
+        setAppMessage(`Number of ${baseUnitLabel(baseUnit)} per packet must be greater than zero.`);
         return;
       }
       if (!medicineForm.price_per_tablet || Number(medicineForm.price_per_tablet) <= 0) {
-        setAppMessage("Selling price per tablet must be greater than zero.");
+        setAppMessage(`Selling price per ${baseUnitLabel(baseUnit)} must be greater than zero.`);
         return;
       }
       quantityPurchase = Number(medicineForm.number_of_packets);
-      unitsPerPurchase = tabletsPerPacket;
+      unitsPerPurchase = perPacket;
       purchaseUnit = "packet";
       sellingPrice = Number(medicineForm.price_per_tablet);
     } else {
@@ -638,13 +652,18 @@ export function App() {
     try {
       let drugId = medicineForm.existing_drug_id;
       if (drugId) {
-        await apiRequest(`/drugs/${drugId}`, "PUT", token, { reorder_level: minStock });
+        await apiRequest(`/drugs/${drugId}`, "PUT", token, {
+          reorder_level: minStock,
+          unit: baseUnit,
+          purchase_unit: purchaseUnit,
+          units_per_purchase: unitsPerPurchase
+        });
       } else {
         const sku = `${medicineForm.name.replace(/\s+/g, "-").toUpperCase()}-${Date.now().toString().slice(-5)}`;
         const createdDrug = await apiRequest("/drugs", "POST", token, {
           name: medicineForm.name.trim(),
           sku,
-          unit: isTablet ? "tablet" : baseUnit,
+          unit: baseUnit,
           purchase_unit: purchaseUnit,
           units_per_purchase: unitsPerPurchase,
           category: "General",
@@ -662,7 +681,7 @@ export function App() {
         unit_cost: Number(medicineForm.buying_price),
         selling_price: sellingPrice
       };
-      if (isTablet) {
+      if (packed) {
         batchPayload.quantity_received_purchase = quantityPurchase;
       } else {
         batchPayload.quantity_received = quantityBase;
@@ -893,7 +912,9 @@ export function App() {
       unit_price: String(drug.unit_price ?? 0),
       unit_cost: String(drug.unit_cost ?? 0),
       nearest_expiry: drug.nearest_expiry || "",
-      reorder_level: String(drug.reorder_level ?? 0)
+      reorder_level: String(drug.reorder_level ?? 0),
+      unit: normalizeBaseUnit(drug.unit),
+      units_per_purchase: String(drug.units_per_purchase ?? 1)
     });
   };
 
@@ -929,9 +950,23 @@ export function App() {
         setAppMessage("Minimum stock level must be zero or greater.");
         return;
       }
+      const baseUnit = normalizeBaseUnit(editingStock.unit);
+      const packed = usesPacketPackaging(baseUnit);
+      let unitsPerPurchase = Number(editingStock.units_per_purchase || 1);
+      if (packed) {
+        if (!unitsPerPurchase || unitsPerPurchase < 1) {
+          setAppMessage(`Units per packet must be at least 1.`);
+          return;
+        }
+      } else {
+        unitsPerPurchase = 1;
+      }
       await apiRequest(`/drugs/${editingStock.drug_id}`, "PUT", token, {
         name: editingStock.drug_name.trim(),
-        reorder_level: minStock
+        reorder_level: minStock,
+        unit: baseUnit,
+        purchase_unit: packed ? "packet" : baseUnit,
+        units_per_purchase: unitsPerPurchase
       });
       if (editingStock.batch_id) {
         await apiRequest(`/stock/batches/${editingStock.batch_id}`, "PUT", token, {
@@ -970,15 +1005,20 @@ export function App() {
 
   const formatDisplayQuantity = (totalQty, unit, purchaseUnit, unitsPerPurchase) => {
     const baseQty = Number(totalQty || 0);
+    const unitLabel = baseUnitLabel(unit);
+    // Tablets/capsules: show base count only (no packet breakdown)
+    if (usesPacketPackaging(unit)) {
+      return `${baseQty} ${unitLabel}`;
+    }
     const packSize = Number(unitsPerPurchase || 1);
     if (packSize <= 1 || !purchaseUnit) {
-      return `${baseQty} ${unit || ""}`.trim();
+      return `${baseQty} ${unitLabel}`.trim();
     }
     const packs = Math.floor(baseQty / packSize);
     const remainder = baseQty % packSize;
-    if (packs > 0 && remainder > 0) return `${packs} ${purchaseUnit} + ${remainder} ${unit}`;
+    if (packs > 0 && remainder > 0) return `${packs} ${purchaseUnit} + ${remainder} ${unitLabel}`;
     if (packs > 0) return `${packs} ${purchaseUnit}`;
-    return `${remainder} ${unit}`;
+    return `${remainder} ${unitLabel}`;
   };
 
   const addCartLine = () => {
@@ -1301,19 +1341,7 @@ export function App() {
                     {lowStockUnique.length > 0 ? (
                       <ul className="alert-chip-list">
                         {lowStockUnique.map((i) => (
-                          <li key={`low-${i.batch_id || i.drug_id}`}>
-                            {i.drug_name}
-                            {i.batch_no ? <span className="alert-batch">{i.batch_no}</span> : null}
-                            <span className="alert-qty">
-                              {formatDisplayQuantity(
-                                i.total_quantity,
-                                i.unit,
-                                i.purchase_unit,
-                                i.units_per_purchase
-                              )}{" "}
-                              left
-                            </span>
-                          </li>
+                          <li key={`low-${i.batch_id || i.drug_id}`}>{formatAlertStockLine(i)}</li>
                         ))}
                       </ul>
                     ) : (
@@ -1326,17 +1354,8 @@ export function App() {
                       <ul className="alert-chip-list">
                         {nearExpiryItems.map((i) => (
                           <li key={`exp-${i.batch_id || i.drug_id}`}>
-                            {i.drug_name}
-                            {i.batch_no ? <span className="alert-batch">{i.batch_no}</span> : null}
-                            <span className="alert-qty">
-                              {formatDisplayQuantity(
-                                i.total_quantity,
-                                i.unit,
-                                i.purchase_unit,
-                                i.units_per_purchase
-                              )}{" "}
-                              · exp {i.nearest_expiry}
-                            </span>
+                            {formatAlertStockLine(i)}
+                            {i.nearest_expiry ? ` · ${i.nearest_expiry}` : ""}
                           </li>
                         ))}
                       </ul>
@@ -1350,17 +1369,8 @@ export function App() {
                       <ul className="alert-chip-list">
                         {expiredItems.map((i) => (
                           <li key={`gone-${i.batch_id || i.drug_id}`}>
-                            {i.drug_name}
-                            {i.batch_no ? <span className="alert-batch">{i.batch_no}</span> : null}
-                            <span className="alert-qty">
-                              {formatDisplayQuantity(
-                                i.total_quantity,
-                                i.unit,
-                                i.purchase_unit,
-                                i.units_per_purchase
-                              )}{" "}
-                              · expired {i.nearest_expiry}
-                            </span>
+                            {formatAlertStockLine(i)}
+                            {i.nearest_expiry ? ` · ${i.nearest_expiry}` : ""}
                           </li>
                         ))}
                       </ul>
@@ -1391,6 +1401,7 @@ export function App() {
                         <th>Buying Price</th>
                         <th>Selling Price</th>
                         <th>Expiry date</th>
+                        <th>Base unit</th>
                         <th>Min stock (pkts/btls)</th>
                         <th>Actions</th>
                       </tr>
@@ -1481,6 +1492,49 @@ export function App() {
                               />
                             ) : (
                               s.nearest_expiry || "-"
+                            )}
+                          </td>
+                          <td>
+                            {isEditing ? (
+                              <div className="action-buttons">
+                                <select
+                                  value={editingStock.unit}
+                                  onChange={(e) => {
+                                    const next = e.target.value;
+                                    setEditingStock({
+                                      ...editingStock,
+                                      unit: next,
+                                      units_per_purchase: usesPacketPackaging(next)
+                                        ? editingStock.units_per_purchase || "1"
+                                        : "1"
+                                    });
+                                  }}
+                                >
+                                  {BASE_UNITS.map((u) => (
+                                    <option key={u.value} value={u.value}>
+                                      {u.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                {usesPacketPackaging(editingStock.unit) ? (
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    title="Per packet"
+                                    placeholder="Per packet"
+                                    value={editingStock.units_per_purchase}
+                                    onChange={(e) =>
+                                      setEditingStock({ ...editingStock, units_per_purchase: e.target.value })
+                                    }
+                                  />
+                                ) : null}
+                              </div>
+                            ) : (
+                              `${baseUnitLabel(s.unit)}${
+                                usesPacketPackaging(s.unit) && Number(s.units_per_purchase || 1) > 1
+                                  ? ` (${s.units_per_purchase}/packet)`
+                                  : ""
+                              }`
                             )}
                           </td>
                           <td>
@@ -1608,7 +1662,7 @@ export function App() {
                     onChange={(e) => setMedicineForm({ ...medicineForm, batch_no: e.target.value })}
                   />
                 </label>
-                {medicineForm.base_unit === "tablet" ? (
+                {usesPacketPackaging(medicineForm.base_unit) ? (
                   <>
                     <label>
                       Number of packets
@@ -1619,7 +1673,7 @@ export function App() {
                       />
                     </label>
                     <label>
-                      Number of tablets per packet
+                      Number of {baseUnitLabel(medicineForm.base_unit)} per packet
                       <input
                         type="number"
                         value={medicineForm.tablets_per_packet}
@@ -1627,7 +1681,7 @@ export function App() {
                       />
                     </label>
                     <label>
-                      Selling price per tablet
+                      Selling price per {baseUnitLabel(medicineForm.base_unit)}
                       <input
                         type="number"
                         step="0.01"
@@ -1705,8 +1759,8 @@ export function App() {
                   />
                 </label>
                 <label>
-                  {medicineForm.base_unit === "tablet"
-                    ? "Minimum stock level (packets)"
+                  {usesPacketPackaging(medicineForm.base_unit)
+                    ? "Minimum stock level (packet)"
                     : `Minimum stock level (${baseUnitLabel(medicineForm.base_unit)})`}
                   <input
                     type="number"
