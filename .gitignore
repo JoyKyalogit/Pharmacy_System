@@ -22,6 +22,11 @@ backend/.venv/
 frontend/.env
 backend/.env
 
+# Database backups (keep local / OneDrive — do not commit)
+backups/
+*.dump
+*.sql.bak
+
 # Logs
 *.log
 

@@ -779,6 +779,28 @@ label {
   font-weight: 600;
 }
 
+.report-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.report-actions {
+  margin: 12px 0 16px;
+  flex-wrap: wrap;
+}
+
+.pharmacist-report-table .report-date-cell {
+  vertical-align: top;
+  font-weight: 700;
+  white-space: nowrap;
+  background: #f8fafc;
+}
+
+.report-sale-search {
+  max-width: 360px;
+}
+
 .receipt-panel {
   margin-top: 20px;
   padding-top: 16px;

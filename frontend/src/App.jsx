@@ -133,9 +133,9 @@ function formatMinStockLevel(level, unit) {
   return `${qty} ${pluralUnit(qty, label)}`;
 }
 
-function formatAlertStockLine(item) {
+function formatAlertStockLine(item, { includeBatch = true } = {}) {
   const name = item.drug_name || "";
-  const batch = (item.batch_no || "").trim();
+  const batch = includeBatch ? (item.batch_no || "").trim() : "";
   const qty = Number(item.total_quantity || 0);
   const unit = pluralUnit(qty, baseUnitLabel(item.unit));
   return [name, batch, `${qty} ${unit}`].filter(Boolean).join(" ");
@@ -256,6 +256,227 @@ function printReceiptDocument(receipt) {
   }, 1000);
 }
 
+const REPORT_HISTORY_KEY = "pharmacy_report_history";
+
+function formatReportDayLabel(dateStr) {
+  if (!dateStr) return "";
+  const parts = String(dateStr).split("-");
+  if (parts.length < 3) return dateStr;
+  return `${Number(parts[2])}/${Number(parts[1])}/${parts[0]}`;
+}
+
+function formatReportMonthLabel(monthStr) {
+  if (!monthStr || !String(monthStr).includes("-")) return monthStr || "";
+  const [y, m] = String(monthStr).split("-");
+  return `${Number(m)}/${y}`;
+}
+
+function groupPharmacistRowsByDate(rows) {
+  const groups = [];
+  for (const row of rows || []) {
+    const last = groups[groups.length - 1];
+    if (!last || last.date !== row.date) {
+      groups.push({ date: row.date, rows: [row] });
+    } else {
+      last.rows.push(row);
+    }
+  }
+  return groups;
+}
+
+function loadReportHistory() {
+  try {
+    const raw = localStorage.getItem(REPORT_HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveReportHistoryEntry(entry) {
+  const prev = loadReportHistory().filter((h) => h.id !== entry.id);
+  const next = [entry, ...prev].slice(0, 24);
+  localStorage.setItem(REPORT_HISTORY_KEY, JSON.stringify(next));
+  return next;
+}
+
+function saleDateValue(sale) {
+  return String(sale?.date || "").slice(0, 10);
+}
+
+function filterReceiptsByRange(receipts, fromDate, toDate) {
+  return (receipts || []).filter((row) => {
+    const d = saleDateValue(row);
+    if (fromDate && d < fromDate) return false;
+    if (toDate && d > toDate) return false;
+    return true;
+  });
+}
+
+function receiptMatchesSearch(row, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return true;
+  const receiptNo = String(row.receipt_no || "").toLowerCase();
+  const isoDate = saleDateValue(row);
+  const displayDate = formatReportDayLabel(isoDate).toLowerCase();
+  const amount = Number(row.amount || 0).toFixed(2);
+  return receiptNo.includes(q) || isoDate.includes(q) || displayDate.includes(q) || amount.includes(q);
+}
+
+function buildSalesReportPrintDocument(report, periodLabel, receiptsOverride) {
+  const receipts = receiptsOverride || report.receipts || [];
+  const receiptDates = new Set(receipts.map((row) => saleDateValue(row)));
+  const days = (report.daily_totals || []).filter((d) => {
+    const hasSales = Number(d.sales_count || 0) > 0 || Number(d.gross_revenue || 0) > 0;
+    if (!hasSales) return false;
+    if (receiptsOverride) return receiptDates.has(saleDateValue(d));
+    return true;
+  });
+  const dayRows = days
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(formatReportDayLabel(row.date))}</td>
+        <td class="num">${Number(row.sales_count || 0)}</td>
+        <td class="num">${Number(row.gross_revenue || 0).toFixed(2)}</td>
+      </tr>`
+    )
+    .join("");
+
+  const pharmacistGroups = groupPharmacistRowsByDate(
+    (report.by_pharmacist || []).filter((row) => !receiptsOverride || receiptDates.has(saleDateValue(row)))
+  );
+  const pharmacistRows = pharmacistGroups
+    .map((group) =>
+      group.rows
+        .map(
+          (row, idx) => `
+      <tr>
+        ${
+          idx === 0
+            ? `<td rowspan="${group.rows.length}">${escapeHtml(formatReportDayLabel(group.date))}</td>`
+            : ""
+        }
+        <td>${escapeHtml(row.pharmacist_name)}</td>
+        <td class="num">${Number(row.sales_count || 0)}</td>
+        <td class="num">${Number(row.gross_revenue || 0).toFixed(2)}</td>
+      </tr>`
+        )
+        .join("")
+    )
+    .join("");
+
+  const itemRows = (report.items || [])
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(row.drug_name)}</td>
+        <td class="num">${Number(row.quantity || 0)}</td>
+        <td class="num">${Number(row.buying_price || 0).toFixed(2)}</td>
+        <td class="num">${Number(row.amount || 0).toFixed(2)}</td>
+      </tr>`
+    )
+    .join("");
+
+  const receiptTotal = receipts.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const receiptRows = receipts
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(formatReportDayLabel(row.date))}</td>
+        <td>${escapeHtml(row.receipt_no)}</td>
+        <td class="num">${Number(row.amount || 0).toFixed(2)}</td>
+      </tr>`
+    )
+    .join("");
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Sales Report — ${escapeHtml(periodLabel)}</title>
+  <style>
+    @page { size: A4; margin: 14mm; }
+    body { font-family: "Segoe UI", Arial, sans-serif; color: #111; font-size: 12px; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    h2 { font-size: 14px; margin: 18px 0 8px; }
+    .meta { color: #444; margin: 0 0 14px; }
+    table { width: 100%; border-collapse: collapse; margin: 0 0 8px; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }
+    th { background: #f1f5f9; }
+    .num { text-align: right; }
+    .summary { margin: 10px 0 16px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(PHARMACY_NAME)}</h1>
+  <p class="meta">${escapeHtml(PHARMACY_PO_BOX)} · ${escapeHtml(PHARMACY_TELEPHONE)}</p>
+  <p class="summary"><strong>Sales report</strong> · Period: ${escapeHtml(periodLabel)}<br />
+  Transactions: ${receipts.length || Number(report.sales_count || 0)} · Revenue: KES ${
+    receipts.length ? receiptTotal.toFixed(2) : Number(report.gross_revenue || 0).toFixed(2)
+  }</p>
+  ${
+    receiptRows
+      ? `<h2>Receipts</h2><table><thead><tr><th>Date</th><th>Receipt number</th><th class="num">Amount (KES)</th></tr></thead><tbody>${receiptRows}</tbody>
+         <tfoot><tr><td colspan="2"><strong>Total</strong></td><td class="num"><strong>${receiptTotal.toFixed(2)}</strong></td></tr></tfoot></table>`
+      : ""
+  }
+  ${
+    dayRows
+      ? `<h2>Daily sales</h2><table><thead><tr><th>Date</th><th class="num">Transactions</th><th class="num">Revenue (KES)</th></tr></thead><tbody>${dayRows}</tbody></table>`
+      : ""
+  }
+  ${
+    pharmacistRows
+      ? `<h2>Sales by pharmacist</h2><table><thead><tr><th>Date</th><th>Pharmacist</th><th class="num">Transactions</th><th class="num">Amount (KES)</th></tr></thead><tbody>${pharmacistRows}</tbody></table>`
+      : ""
+  }
+  ${
+    itemRows
+      ? `<h2>Medicines sold</h2><table><thead><tr><th>Medicine</th><th class="num">Qty</th><th class="num">Buying Price</th><th class="num">Amount (KES)</th></tr></thead><tbody>${itemRows}</tbody></table>`
+      : ""
+  }
+</body>
+</html>`;
+}
+
+function printSalesReportDocument(report, periodLabel, receipts) {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("title", "Print sales report");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentWindow?.document;
+  if (!doc) {
+    document.body.removeChild(iframe);
+    return;
+  }
+  doc.open();
+  doc.write(buildSalesReportPrintDocument(report, periodLabel, receipts));
+  doc.close();
+  iframe.contentWindow.focus();
+  iframe.contentWindow.print();
+  setTimeout(() => {
+    document.body.removeChild(iframe);
+  }, 1000);
+}
+
+function downloadSalesReportDocument(report, periodLabel, receipts) {
+  const html = buildSalesReportPrintDocument(report, periodLabel, receipts);
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const safeName = String(periodLabel || "report")
+    .replace(/[^\w.-]+/g, "_")
+    .replace(/_+/g, "_");
+  a.href = url;
+  a.download = `sales_report_${safeName}.html`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function App() {
   const [token, setToken] = useState("");
   const [user, setUser] = useState(null);
@@ -297,8 +518,15 @@ export function App() {
   const [dailySales, setDailySales] = useState(null);
   const [reportPreset, setReportPreset] = useState("today");
   const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [reportDay, setReportDay] = useState(new Date().toISOString().slice(0, 10));
   const [reportStartDate, setReportStartDate] = useState("");
   const [reportEndDate, setReportEndDate] = useState("");
+  const [reportHistory, setReportHistory] = useState(() => loadReportHistory());
+  const [isLoadingReport, setIsLoadingReport] = useState(false);
+  const [selectedHistoryId, setSelectedHistoryId] = useState("");
+  const [saleSearch, setSaleSearch] = useState("");
+  const [printFromDate, setPrintFromDate] = useState("");
+  const [printToDate, setPrintToDate] = useState("");
   const [editingDrugId, setEditingDrugId] = useState(null);
   const [editingStock, setEditingStock] = useState(null);
   const [selectedDrug, setSelectedDrug] = useState(null);
@@ -924,23 +1152,15 @@ export function App() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  const loadSalesToday = async () => {
-    try {
-      const data = await apiRequest("/reports/sales-summary?preset=today", "GET", token);
-      setDailySales(data);
-    } catch (err) {
-      setAppMessage(`Daily sales report failed: ${err.message}`);
-    }
-  };
-
-  const loadSalesSummary = async () => {
+  const loadSalesSummary = useCallback(async () => {
+    if (!token) return;
     try {
       let path = `/reports/sales-summary?preset=${reportPreset}`;
+      let historyLabel = "Today";
+      let historyId = `today-${new Date().toISOString().slice(0, 10)}`;
+
       if (reportPreset === "month") {
-        if (!reportMonth) {
-          setAppMessage("Select month first.");
-          return;
-        }
+        if (!reportMonth) return;
         const [yearStr, monthStr] = reportMonth.split("-");
         const year = Number(yearStr);
         const month = Number(monthStr);
@@ -948,19 +1168,65 @@ export function App() {
         const startDate = `${yearStr}-${monthStr}-01`;
         const endDate = `${yearStr}-${monthStr}-${String(lastDay).padStart(2, "0")}`;
         path = `/reports/sales-summary?preset=custom&start_date=${startDate}&end_date=${endDate}`;
+        historyLabel = `Month ${formatReportMonthLabel(reportMonth)}`;
+        historyId = `month-${reportMonth}`;
+      } else if (reportPreset === "day") {
+        if (!reportDay) return;
+        path = `/reports/sales-summary?preset=custom&start_date=${reportDay}&end_date=${reportDay}`;
+        historyLabel = `Date ${formatReportDayLabel(reportDay)}`;
+        historyId = `day-${reportDay}`;
       } else if (reportPreset === "custom") {
-        if (!reportStartDate || !reportEndDate) {
-          setAppMessage("Select both start and end date.");
-          return;
-        }
+        if (!reportStartDate || !reportEndDate) return;
         path += `&start_date=${reportStartDate}&end_date=${reportEndDate}`;
+        historyLabel = `${formatReportDayLabel(reportStartDate)} – ${formatReportDayLabel(reportEndDate)}`;
+        historyId = `custom-${reportStartDate}_${reportEndDate}`;
+      } else if (reportPreset === "today") {
+        path = `/reports/sales-summary?preset=today`;
+        historyLabel = `Today ${formatReportDayLabel(new Date().toISOString().slice(0, 10))}`;
+        historyId = `today-${new Date().toISOString().slice(0, 10)}`;
       }
+
+      setIsLoadingReport(true);
       const data = await apiRequest(path, "GET", token);
       setDailySales(data);
+      setSaleSearch("");
+      setPrintFromDate(data.range?.start_date || "");
+      setPrintToDate(data.range?.end_date || "");
+      setSelectedHistoryId(historyId);
+      const entry = {
+        id: historyId,
+        label: historyLabel,
+        savedAt: new Date().toISOString(),
+        data
+      };
+      setReportHistory(saveReportHistoryEntry(entry));
     } catch (err) {
       setAppMessage(`Sales summary failed: ${err.message}`);
+    } finally {
+      setIsLoadingReport(false);
     }
-  };
+  }, [token, reportPreset, reportMonth, reportDay, reportStartDate, reportEndDate]);
+
+  useEffect(() => {
+    if (!token || activePage !== "reports" || !isAdminSession) return undefined;
+    if (reportPreset === "month" && !reportMonth) return undefined;
+    if (reportPreset === "day" && !reportDay) return undefined;
+    if (reportPreset === "custom" && (!reportStartDate || !reportEndDate)) return undefined;
+    const timer = setTimeout(() => {
+      loadSalesSummary();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [
+    token,
+    activePage,
+    isAdminSession,
+    reportPreset,
+    reportMonth,
+    reportDay,
+    reportStartDate,
+    reportEndDate,
+    loadSalesSummary
+  ]);
 
   const startEditDrug = (drug) => {
     setEditingDrugId(drug.batch_id ? `batch-${drug.batch_id}` : `drug-${drug.drug_id}`);
@@ -1354,42 +1620,64 @@ export function App() {
     .sort((a, b) => a.drug_name.localeCompare(b.drug_name));
 
   const uniqueDrugIds = new Set(stock.map((s) => s.drug_id));
-  const lowStockItems = stock.filter((s) => s.is_low_stock && s.batch_id);
-  const lowStockUnique = lowStockItems;
+  // Combine all batches of the same medicine, then compare total to min stock
+  const lowStockUnique = (() => {
+    const byDrug = new Map();
+    for (const s of stock) {
+      if (!s.batch_id) continue;
+      const id = s.drug_id;
+      if (!byDrug.has(id)) {
+        byDrug.set(id, {
+          drug_id: id,
+          drug_name: s.drug_name,
+          unit: s.unit,
+          purchase_unit: s.purchase_unit,
+          units_per_purchase: s.units_per_purchase,
+          reorder_level: Number(s.reorder_level || 0),
+          total_quantity: 0
+        });
+      }
+      byDrug.get(id).total_quantity += Number(s.total_quantity || 0);
+    }
+    return [...byDrug.values()].filter((d) => {
+      const upp = Number(d.units_per_purchase || 1);
+      const qtyPurchase = upp > 1 ? d.total_quantity / upp : d.total_quantity;
+      return qtyPurchase <= d.reorder_level;
+    });
+  })();
   const nearExpiryItems = stock.filter((s) => s.is_near_expiry);
   const expiredItems = stock.filter((s) => s.is_expired);
   const totalMedicines = uniqueDrugIds.size;
   const totalUnitsInStock = stock.reduce((sum, item) => sum + Number(item.total_quantity || 0), 0);
-  const formatMonthYear = (dateStr) => {
-    if (!dateStr) return "";
-    const parts = dateStr.split("-");
-    if (parts.length < 2) return dateStr;
-    return `${Number(parts[1])}/${parts[0]}`;
-  };
   const reportPeriodLabel = dailySales?.range
     ? dailySales.range.start_date === dailySales.range.end_date
-      ? formatMonthYear(dailySales.range.start_date)
-      : `${formatMonthYear(dailySales.range.start_date)} – ${formatMonthYear(dailySales.range.end_date)}`
+      ? formatReportDayLabel(dailySales.range.start_date)
+      : `${formatReportDayLabel(dailySales.range.start_date)} – ${formatReportDayLabel(dailySales.range.end_date)}`
     : dailySales?.date
-      ? formatMonthYear(dailySales.date)
+      ? formatReportDayLabel(dailySales.date)
       : "";
-  const formatReportDayLabel = (dateStr) => {
-    if (!dateStr) return "";
-    const parts = dateStr.split("-");
-    if (parts.length < 3) return dateStr;
-    return `${Number(parts[2])}/${Number(parts[1])}/${parts[0]}`;
-  };
   const hasReportData = Boolean(
     dailySales &&
       (Number(dailySales.sales_count) > 0 ||
         Number(dailySales.gross_revenue) > 0 ||
         (dailySales.items?.length ?? 0) > 0 ||
-        (dailySales.by_pharmacist?.length ?? 0) > 0)
+        (dailySales.by_pharmacist?.length ?? 0) > 0 ||
+        (dailySales.receipts?.length ?? 0) > 0)
   );
   const reportDaysWithSales = (dailySales?.daily_totals ?? []).filter(
     (row) => Number(row.sales_count) > 0 || Number(row.gross_revenue) > 0
   );
   const showDailyBreakdown = reportDaysWithSales.length > 1;
+  const pharmacistGroups = groupPharmacistRowsByDate(dailySales?.by_pharmacist || []);
+  const printReceipts = filterReceiptsByRange(dailySales?.receipts || [], printFromDate, printToDate);
+  const searchedReceipts = printReceipts.filter((row) => receiptMatchesSearch(row, saleSearch));
+  const printRangeLabel =
+    printFromDate && printToDate
+      ? printFromDate === printToDate
+        ? formatReportDayLabel(printFromDate)
+        : `${formatReportDayLabel(printFromDate)} – ${formatReportDayLabel(printToDate)}`
+      : reportPeriodLabel;
+  const printReceiptTotal = printReceipts.reduce((sum, row) => sum + Number(row.amount || 0), 0);
 
   return (
     <div className="container">
@@ -1517,7 +1805,7 @@ export function App() {
                     {lowStockUnique.length > 0 ? (
                       <ul className="alert-chip-list">
                         {lowStockUnique.map((i) => (
-                          <li key={`low-${i.batch_id || i.drug_id}`}>{formatAlertStockLine(i)}</li>
+                          <li key={`low-${i.drug_id}`}>{formatAlertStockLine(i, { includeBatch: false })}</li>
                         ))}
                       </ul>
                     ) : (
@@ -2306,24 +2594,146 @@ export function App() {
                 <button type="button" onClick={() => goToPage("stock")}>
                   Back to stock
                 </button>
-                <div className="grid">
-                  <select value={reportPreset} onChange={(e) => setReportPreset(e.target.value)}>
-                    <option value="today">Today</option>
-                    <option value="month">By Month</option>
-                    <option value="custom">Custom Range</option>
-                  </select>
+                <div className="grid report-controls">
+                  <label>
+                    Period
+                    <select
+                      value={reportPreset}
+                      onChange={(e) => {
+                        setSelectedHistoryId("");
+                        setReportPreset(e.target.value);
+                      }}
+                    >
+                      <option value="today">Today</option>
+                      <option value="day">Specific date</option>
+                      <option value="month">By month</option>
+                      <option value="custom">Custom range</option>
+                    </select>
+                  </label>
+                  {reportPreset === "day" ? (
+                    <label>
+                      Date
+                      <input
+                        type="date"
+                        value={reportDay}
+                        onChange={(e) => {
+                          setSelectedHistoryId("");
+                          setReportDay(e.target.value);
+                        }}
+                      />
+                    </label>
+                  ) : null}
                   {reportPreset === "month" ? (
-                    <input type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} />
+                    <label>
+                      Month
+                      <input
+                        type="month"
+                        value={reportMonth}
+                        onChange={(e) => {
+                          setSelectedHistoryId("");
+                          setReportMonth(e.target.value);
+                        }}
+                      />
+                    </label>
                   ) : null}
                   {reportPreset === "custom" ? (
                     <>
-                      <input type="date" value={reportStartDate} onChange={(e) => setReportStartDate(e.target.value)} />
-                      <input type="date" value={reportEndDate} onChange={(e) => setReportEndDate(e.target.value)} />
+                      <label>
+                        From
+                        <input
+                          type="date"
+                          value={reportStartDate}
+                          onChange={(e) => {
+                            setSelectedHistoryId("");
+                            setReportStartDate(e.target.value);
+                          }}
+                        />
+                      </label>
+                      <label>
+                        To
+                        <input
+                          type="date"
+                          value={reportEndDate}
+                          onChange={(e) => {
+                            setSelectedHistoryId("");
+                            setReportEndDate(e.target.value);
+                          }}
+                        />
+                      </label>
                     </>
                   ) : null}
+                  <label>
+                    Past reports
+                    <select
+                      value={selectedHistoryId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setSelectedHistoryId(id);
+                        const found = reportHistory.find((h) => h.id === id);
+                        if (found?.data) {
+                          setDailySales(found.data);
+                          setSaleSearch("");
+                          setPrintFromDate(found.data.range?.start_date || "");
+                          setPrintToDate(found.data.range?.end_date || "");
+                        }
+                      }}
+                    >
+                      <option value="">Select a saved report…</option>
+                      {reportHistory.map((h) => (
+                        <option key={h.id} value={h.id}>
+                          {h.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
-                <button onClick={loadSalesSummary}>Load Report</button>
-                <button onClick={loadSalesToday}>Todays Report</button>
+                <div className="grid report-controls">
+                  <label>
+                    Print receipts from
+                    <input
+                      type="date"
+                      value={printFromDate}
+                      min={dailySales?.range?.start_date || undefined}
+                      max={printToDate || dailySales?.range?.end_date || undefined}
+                      onChange={(e) => setPrintFromDate(e.target.value)}
+                      disabled={!dailySales}
+                    />
+                  </label>
+                  <label>
+                    Print receipts to
+                    <input
+                      type="date"
+                      value={printToDate}
+                      min={printFromDate || dailySales?.range?.start_date || undefined}
+                      max={dailySales?.range?.end_date || undefined}
+                      onChange={(e) => setPrintToDate(e.target.value)}
+                      disabled={!dailySales}
+                    />
+                  </label>
+                </div>
+                <div className="action-buttons report-actions">
+                  <button type="button" onClick={loadSalesSummary} disabled={isLoadingReport}>
+                    {isLoadingReport ? "Loading..." : "Refresh"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!dailySales || !printReceipts.length}
+                    onClick={() => printSalesReportDocument(dailySales, printRangeLabel, printReceipts)}
+                  >
+                    Print / Save as PDF
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!dailySales || !printReceipts.length}
+                    onClick={() => {
+                      downloadSalesReportDocument(dailySales, printRangeLabel, printReceipts);
+                      setAppMessage("Report downloaded. Open the file anytime, or print it to PDF from your browser.");
+                    }}
+                  >
+                    Download report
+                  </button>
+                </div>
+                {isLoadingReport && !dailySales ? <p>Loading report…</p> : null}
                 {dailySales ? (
                   <div>
                     <p>
@@ -2337,6 +2747,68 @@ export function App() {
                       <strong>Total — Transactions:</strong> {dailySales.sales_count} ·{" "}
                       <strong>Revenue:</strong> KES {Number(dailySales.gross_revenue || 0).toFixed(2)}
                     </p>
+                    {printFromDate || printToDate ? (
+                      <p>
+                        <strong>Print range:</strong> {printRangeLabel} · {printReceipts.length} receipt
+                        {printReceipts.length === 1 ? "" : "s"} · KES {printReceiptTotal.toFixed(2)}
+                      </p>
+                    ) : null}
+
+                    {printReceipts.length ? (
+                      <>
+                        <h3>Receipts</h3>
+                        <label>
+                          Search sale by date or receipt number
+                          <input
+                            className="report-sale-search"
+                            type="search"
+                            placeholder="e.g. 00038/2026 or 14/8/2026"
+                            value={saleSearch}
+                            onChange={(e) => setSaleSearch(e.target.value)}
+                          />
+                        </label>
+                        <div className="table-scroll">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Date</th>
+                                <th>Receipt number</th>
+                                <th>Amount (KES)</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {searchedReceipts.length ? (
+                                searchedReceipts.map((row) => (
+                                  <tr key={row.id || row.receipt_no}>
+                                    <td>{formatReportDayLabel(row.date)}</td>
+                                    <td>{row.receipt_no}</td>
+                                    <td>{Number(row.amount || 0).toFixed(2)}</td>
+                                  </tr>
+                                ))
+                              ) : (
+                                <tr>
+                                  <td colSpan={3}>No sale matches that search in the selected print range.</td>
+                                </tr>
+                              )}
+                            </tbody>
+                            <tfoot>
+                              <tr>
+                                <td colSpan={2}>
+                                  <strong>{saleSearch ? "Matching total" : "Range total"}</strong>
+                                </td>
+                                <td>
+                                  <strong>
+                                    {searchedReceipts
+                                      .reduce((sum, row) => sum + Number(row.amount || 0), 0)
+                                      .toFixed(2)}
+                                  </strong>
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </>
+                    ) : null}
 
                     {reportDaysWithSales.length ? (
                       <>
@@ -2377,10 +2849,10 @@ export function App() {
                       </>
                     ) : null}
 
-                    {dailySales.by_pharmacist?.length ? (
+                    {pharmacistGroups.length ? (
                       <>
                         <h3>Sales by pharmacist</h3>
-                        <table>
+                        <table className="pharmacist-report-table">
                           <thead>
                             <tr>
                               <th>Date</th>
@@ -2390,14 +2862,20 @@ export function App() {
                             </tr>
                           </thead>
                           <tbody>
-                            {dailySales.by_pharmacist.map((row) => (
-                              <tr key={`${row.user_id}-${row.date}`}>
-                                <td>{formatReportDayLabel(row.date)}</td>
-                                <td>{row.pharmacist_name}</td>
-                                <td>{row.sales_count}</td>
-                                <td>{Number(row.gross_revenue || 0).toFixed(2)}</td>
-                              </tr>
-                            ))}
+                            {pharmacistGroups.map((group) =>
+                              group.rows.map((row, idx) => (
+                                <tr key={`${row.user_id}-${row.date}`}>
+                                  {idx === 0 ? (
+                                    <td rowSpan={group.rows.length} className="report-date-cell">
+                                      {formatReportDayLabel(group.date)}
+                                    </td>
+                                  ) : null}
+                                  <td>{row.pharmacist_name}</td>
+                                  <td>{row.sales_count}</td>
+                                  <td>{Number(row.gross_revenue || 0).toFixed(2)}</td>
+                                </tr>
+                              ))
+                            )}
                           </tbody>
                         </table>
                       </>
@@ -2432,7 +2910,7 @@ export function App() {
                     )}
                   </div>
                 ) : (
-                  <p>Load a report to view totals and medicine quantities.</p>
+                  <p>Select a period to view the report.</p>
                 )}
               </section>
             ) : null}

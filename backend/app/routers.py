@@ -448,8 +448,8 @@ def stock_levels(db: Session = Depends(get_db), user: User = Depends(require_rol
         qty = int(r.quantity_available or 0)
         total_for_drug = int(drug_totals.get(r.id, 0))
         units_per_purchase = int(r.units_per_purchase or 1)
-        # reorder_level is entered in packets/bottles (purchase units)
-        qty_purchase = qty / units_per_purchase if units_per_purchase > 1 else qty
+        # reorder_level is in packets/bottles; compare against combined stock for the drug
+        total_purchase = total_for_drug / units_per_purchase if units_per_purchase > 1 else total_for_drug
         result.append(
             {
                 "drug_id": r.id,
@@ -461,7 +461,7 @@ def stock_levels(db: Session = Depends(get_db), user: User = Depends(require_rol
                 "unit_price": float(r.selling_price or 0),
                 "unit_cost": float(r.unit_cost or 0),
                 "reorder_level": r.reorder_level,
-                "is_low_stock": qty_purchase <= r.reorder_level,
+                "is_low_stock": total_purchase <= r.reorder_level,
                 "nearest_expiry": nearest_expiry,
                 "days_to_expiry": days_to_expiry,
                 "is_near_expiry": is_near_expiry,
@@ -571,11 +571,33 @@ def sales_summary(
         .group_by(User.id, User.full_name, func.date(Sale.created_at))
         .order_by(func.date(Sale.created_at).asc(), User.full_name.asc())
     ).all()
+    receipt_rows = db.execute(
+        select(
+            Sale.id,
+            Sale.receipt_no,
+            Sale.grand_total,
+            func.date(Sale.created_at).label("sale_date"),
+            User.full_name.label("pharmacist_name"),
+        )
+        .join(User, User.id == Sale.cashier_id)
+        .where(Sale.created_at >= start, Sale.created_at <= end)
+        .order_by(Sale.created_at.asc(), Sale.id.asc())
+    ).all()
     return {
         "range": {"start_date": str(start_date), "end_date": str(end_date)},
         "sales_count": int(totals.sales_count or 0),
         "gross_revenue": float(totals.gross_revenue or 0),
         "daily_totals": daily_totals,
+        "receipts": [
+            {
+                "id": int(r.id),
+                "receipt_no": r.receipt_no,
+                "date": str(r.sale_date),
+                "amount": float(r.grand_total or 0),
+                "pharmacist_name": r.pharmacist_name,
+            }
+            for r in receipt_rows
+        ],
         "by_pharmacist": [
             {
                 "user_id": int(r.user_id),
