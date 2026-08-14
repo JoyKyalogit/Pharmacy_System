@@ -552,6 +552,7 @@ export function App() {
   const [isLoadingReport, setIsLoadingReport] = useState(false);
   const [selectedDailyHistoryId, setSelectedDailyHistoryId] = useState("");
   const [selectedReceiptsHistoryId, setSelectedReceiptsHistoryId] = useState("");
+  const [reportTab, setReportTab] = useState("daily");
   const [saleSearch, setSaleSearch] = useState("");
   const [printFromDate, setPrintFromDate] = useState("");
   const [printToDate, setPrintToDate] = useState("");
@@ -1718,8 +1719,14 @@ export function App() {
     setSaleSearch("");
     setPrintFromDate(found.data.range?.start_date || "");
     setPrintToDate(found.data.range?.end_date || "");
-    if (kind === "daily") setSelectedDailyHistoryId(found.id);
-    if (kind === "receipts") setSelectedReceiptsHistoryId(found.id);
+    if (kind === "daily") {
+      setSelectedDailyHistoryId(found.id);
+      setReportTab("daily");
+    }
+    if (kind === "receipts") {
+      setSelectedReceiptsHistoryId(found.id);
+      setReportTab("receipts");
+    }
   };
 
   const saveReceiptsHistoryFromCurrent = () => {
@@ -2730,8 +2737,30 @@ export function App() {
                 </div>
                 {isLoadingReport && !dailySales ? <p>Loading report…</p> : null}
 
+                <div className="report-view-tabs" role="tablist" aria-label="Report view">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={reportTab === "daily"}
+                    className={reportTab === "daily" ? "report-view-tab active" : "report-view-tab"}
+                    onClick={() => setReportTab("daily")}
+                  >
+                    Daily sales
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={reportTab === "receipts"}
+                    className={reportTab === "receipts" ? "report-view-tab active" : "report-view-tab"}
+                    onClick={() => setReportTab("receipts")}
+                  >
+                    Receipts report
+                  </button>
+                </div>
+
+                {reportTab === "daily" ? (
                 <div className="report-panel">
-                  <h3>1. Daily sales by pharmacist</h3>
+                  <h3>Daily sales by pharmacist</h3>
                   <p className="sales-helper-text">
                     View day totals and each pharmacist’s sales. Use this past list to reopen earlier daily summaries.
                   </p>
@@ -2895,11 +2924,11 @@ export function App() {
                     <p>Select a period above to load the daily sales report.</p>
                   )}
                 </div>
-
-                <div className="report-panel receipts-report-panel">
-                  <h3>2. Receipts (print / download)</h3>
+                ) : (
+                <div className="report-panel">
+                  <h3>Receipts report</h3>
                   <p className="sales-helper-text">
-                    Separate list for printing receipt numbers and amounts. Date is shown once per day.
+                    Print or download receipt numbers and amounts. Date is shown once per day.
                   </p>
                   <label>
                     Past receipt reports
@@ -3046,6 +3075,7 @@ export function App() {
                     <p>Load a period above first, then print or download receipts here.</p>
                   )}
                 </div>
+                )}
               </section>
             ) : null}
 
