@@ -801,6 +801,22 @@ label {
   max-width: 360px;
 }
 
+.receipts-table-scroll {
+  max-height: min(420px, 55vh);
+  overflow: auto;
+}
+
+.receipts-table-scroll table {
+  min-width: 0;
+  width: 100%;
+}
+
+.receipts-table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 .receipts-report-panel {
   margin-top: 24px;
   padding-top: 16px;

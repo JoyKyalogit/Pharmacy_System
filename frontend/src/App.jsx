@@ -2960,7 +2960,36 @@ export function App() {
                           onChange={(e) => setSaleSearch(e.target.value)}
                         />
                       </label>
-                      <div className="table-scroll">
+                      <div className="action-buttons report-actions">
+                        <button
+                          type="button"
+                          disabled={!displayedReceipts.length}
+                          onClick={() => {
+                            saveReceiptsHistoryFromCurrent();
+                            printSalesReportDocument(dailySales, printRangeLabel, {
+                              receiptsOnly: true,
+                              receiptsOverride: displayedReceipts
+                            });
+                          }}
+                        >
+                          Print receipts / PDF
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!displayedReceipts.length}
+                          onClick={() => {
+                            saveReceiptsHistoryFromCurrent();
+                            downloadSalesReportDocument(dailySales, printRangeLabel, {
+                              receiptsOnly: true,
+                              receiptsOverride: displayedReceipts
+                            });
+                            setAppMessage("Receipts report downloaded.");
+                          }}
+                        >
+                          Download receipts
+                        </button>
+                      </div>
+                      <div className="table-scroll receipts-table-scroll">
                         <table className="receipts-report-table">
                           <thead>
                             <tr>
@@ -3001,35 +3030,6 @@ export function App() {
                             </tfoot>
                           ) : null}
                         </table>
-                      </div>
-                      <div className="action-buttons report-actions">
-                        <button
-                          type="button"
-                          disabled={!displayedReceipts.length}
-                          onClick={() => {
-                            saveReceiptsHistoryFromCurrent();
-                            printSalesReportDocument(dailySales, printRangeLabel, {
-                              receiptsOnly: true,
-                              receiptsOverride: displayedReceipts
-                            });
-                          }}
-                        >
-                          Print receipts / PDF
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!displayedReceipts.length}
-                          onClick={() => {
-                            saveReceiptsHistoryFromCurrent();
-                            downloadSalesReportDocument(dailySales, printRangeLabel, {
-                              receiptsOnly: true,
-                              receiptsOverride: displayedReceipts
-                            });
-                            setAppMessage("Receipts report downloaded.");
-                          }}
-                        >
-                          Download receipts
-                        </button>
                       </div>
                     </>
                   ) : (
