@@ -273,24 +273,6 @@ function formatReportMonthLabel(monthStr) {
   return `${Number(m)}/${y}`;
 }
 
-function groupRowsByDate(rows) {
-  const groups = [];
-  for (const row of rows || []) {
-    const dateKey = saleDateValue(row);
-    const last = groups[groups.length - 1];
-    if (!last || last.date !== dateKey) {
-      groups.push({ date: dateKey, rows: [row] });
-    } else {
-      last.rows.push(row);
-    }
-  }
-  return groups;
-}
-
-function groupPharmacistRowsByDate(rows) {
-  return groupRowsByDate(rows);
-}
-
 function loadHistoryFromKey(storageKey) {
   try {
     const raw = localStorage.getItem(storageKey);
@@ -342,6 +324,15 @@ function receiptMatchesSearch(row, query) {
   return receiptNo.includes(q) || isoDate.includes(q) || displayDate.includes(q) || amount.includes(q);
 }
 
+function daySalesMatchesSearch(row, query, fields = []) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return true;
+  const isoDate = saleDateValue(row);
+  const displayDate = formatReportDayLabel(isoDate).toLowerCase();
+  const haystack = [isoDate, displayDate, ...fields.map((f) => String(f || "").toLowerCase())];
+  return haystack.some((part) => part.includes(q));
+}
+
 function buildSalesReportPrintDocument(report, periodLabel, options = {}) {
   const { receiptsOnly = false, receiptsOverride = null } = options;
   const receipts = receiptsOverride || report.receipts || [];
@@ -359,24 +350,15 @@ function buildSalesReportPrintDocument(report, periodLabel, options = {}) {
     )
     .join("");
 
-  const pharmacistGroups = groupPharmacistRowsByDate(report.by_pharmacist || []);
-  const pharmacistRows = pharmacistGroups
-    .map((group) =>
-      group.rows
-        .map(
-          (row, idx) => `
+  const pharmacistRows = (report.by_pharmacist || [])
+    .map(
+      (row) => `
       <tr>
-        ${
-          idx === 0
-            ? `<td rowspan="${group.rows.length}">${escapeHtml(formatReportDayLabel(group.date))}</td>`
-            : ""
-        }
+        <td>${escapeHtml(formatReportDayLabel(row.date))}</td>
         <td>${escapeHtml(row.pharmacist_name)}</td>
         <td class="num">${Number(row.sales_count || 0)}</td>
         <td class="num">${Number(row.gross_revenue || 0).toFixed(2)}</td>
       </tr>`
-        )
-        .join("")
     )
     .join("");
 
@@ -393,23 +375,14 @@ function buildSalesReportPrintDocument(report, periodLabel, options = {}) {
     .join("");
 
   const receiptTotal = receipts.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const receiptGroups = groupRowsByDate(receipts);
-  const receiptRows = receiptGroups
-    .map((group) =>
-      group.rows
-        .map(
-          (row, idx) => `
+  const receiptRows = receipts
+    .map(
+      (row) => `
       <tr>
-        ${
-          idx === 0
-            ? `<td rowspan="${group.rows.length}">${escapeHtml(formatReportDayLabel(group.date))}</td>`
-            : ""
-        }
+        <td>${escapeHtml(formatReportDayLabel(saleDateValue(row)))}</td>
         <td>${escapeHtml(row.receipt_no)}</td>
         <td class="num">${Number(row.amount || 0).toFixed(2)}</td>
       </tr>`
-        )
-        .join("")
     )
     .join("");
 
@@ -1701,33 +1674,41 @@ export function App() {
     (row) => Number(row.sales_count) > 0 || Number(row.gross_revenue) > 0
   );
   const showDailyBreakdown = reportDaysWithSales.length > 1;
-  const pharmacistGroups = groupPharmacistRowsByDate(dailySales?.by_pharmacist || []);
+  const daySalesSearch = reportTab === "daily" ? saleSearch : "";
+  const receiptsSearch = reportTab === "receipts" ? saleSearch : "";
+  const filteredDaysWithSales = reportDaysWithSales.filter((row) =>
+    daySalesMatchesSearch(row, daySalesSearch, [
+      row.sales_count,
+      Number(row.gross_revenue || 0).toFixed(2)
+    ])
+  );
+  const filteredPharmacistRows = (dailySales?.by_pharmacist || []).filter((row) =>
+    daySalesMatchesSearch(row, daySalesSearch, [
+      row.pharmacist_name,
+      row.sales_count,
+      Number(row.gross_revenue || 0).toFixed(2)
+    ])
+  );
+  const filteredMedicineRows = (dailySales?.items || []).filter((row) =>
+    daySalesMatchesSearch(row, daySalesSearch, [
+      row.drug_name,
+      row.quantity,
+      Number(row.amount || 0).toFixed(2)
+    ])
+  );
   const printReceipts = filterReceiptsByRange(dailySales?.receipts || [], printFromDate, printToDate);
-  const searchedReceipts = printReceipts.filter((row) => receiptMatchesSearch(row, saleSearch));
-  const receiptGroups = groupRowsByDate(searchedReceipts);
+  const searchedReceipts = printReceipts.filter((row) => receiptMatchesSearch(row, receiptsSearch));
+  const displayedReceipts = searchedReceipts;
+  const displayedReceiptTotal = displayedReceipts.reduce(
+    (sum, row) => sum + Number(row.amount || 0),
+    0
+  );
   const printRangeLabel =
     printFromDate && printToDate
       ? printFromDate === printToDate
         ? formatReportDayLabel(printFromDate)
         : `${formatReportDayLabel(printFromDate)} – ${formatReportDayLabel(printToDate)}`
       : reportPeriodLabel;
-  const printReceiptTotal = printReceipts.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-
-  const applySavedReport = (found, kind) => {
-    if (!found?.data) return;
-    setDailySales(found.data);
-    setSaleSearch("");
-    setPrintFromDate(found.data.range?.start_date || "");
-    setPrintToDate(found.data.range?.end_date || "");
-    if (kind === "daily") {
-      setSelectedDailyHistoryId(found.id);
-      setReportTab("daily");
-    }
-    if (kind === "receipts") {
-      setSelectedReceiptsHistoryId(found.id);
-      setReportTab("receipts");
-    }
-  };
 
   const saveReceiptsHistoryFromCurrent = () => {
     if (!dailySales) return;
@@ -2743,16 +2724,22 @@ export function App() {
                     role="tab"
                     aria-selected={reportTab === "daily"}
                     className={reportTab === "daily" ? "report-view-tab active" : "report-view-tab"}
-                    onClick={() => setReportTab("daily")}
+                    onClick={() => {
+                      setReportTab("daily");
+                      setSaleSearch("");
+                    }}
                   >
-                    Daily sales
+                    Day sales
                   </button>
                   <button
                     type="button"
                     role="tab"
                     aria-selected={reportTab === "receipts"}
                     className={reportTab === "receipts" ? "report-view-tab active" : "report-view-tab"}
-                    onClick={() => setReportTab("receipts")}
+                    onClick={() => {
+                      setReportTab("receipts");
+                      setSaleSearch("");
+                    }}
                   >
                     Receipts report
                   </button>
@@ -2760,36 +2747,21 @@ export function App() {
 
                 {reportTab === "daily" ? (
                 <div className="report-panel">
-                  <h3>Daily sales by pharmacist</h3>
-                  <p className="sales-helper-text">
-                    View day totals and each pharmacist’s sales. Use this past list to reopen earlier daily summaries.
-                  </p>
-                  <label>
-                    Past daily reports
-                    <select
-                      value={selectedDailyHistoryId}
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        setSelectedDailyHistoryId(id);
-                        applySavedReport(
-                          dailyReportHistory.find((h) => h.id === id),
-                          "daily"
-                        );
-                      }}
-                    >
-                      <option value="">Select a saved daily report…</option>
-                      {dailyReportHistory.map((h) => (
-                        <option key={h.id} value={h.id}>
-                          {h.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                   {dailySales ? (
                     <>
                       <p>
                         <strong>Period:</strong> {reportPeriodLabel}
                       </p>
+                      <label>
+                        Search day sales
+                        <input
+                          className="report-sale-search"
+                          type="search"
+                          placeholder="e.g. pharmacist name, medicine, or 14/8/2026"
+                          value={saleSearch}
+                          onChange={(e) => setSaleSearch(e.target.value)}
+                        />
+                      </label>
                       {!hasReportData ? (
                         <p className="report-empty">No report available for this period.</p>
                       ) : (
@@ -2798,7 +2770,7 @@ export function App() {
                             <strong>Total — Transactions:</strong> {dailySales.sales_count} ·{" "}
                             <strong>Revenue:</strong> KES {Number(dailySales.gross_revenue || 0).toFixed(2)}
                           </p>
-                          {reportDaysWithSales.length ? (
+                          {filteredDaysWithSales.length ? (
                             <>
                               <h4>{showDailyBreakdown ? "Daily sales" : "Day sales"}</h4>
                               <table>
@@ -2810,7 +2782,7 @@ export function App() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {reportDaysWithSales.map((row) => (
+                                  {filteredDaysWithSales.map((row) => (
                                     <tr key={row.date}>
                                       <td>{formatReportDayLabel(row.date)}</td>
                                       <td>{row.sales_count}</td>
@@ -2818,7 +2790,7 @@ export function App() {
                                     </tr>
                                   ))}
                                 </tbody>
-                                {showDailyBreakdown ? (
+                                {showDailyBreakdown && !daySalesSearch ? (
                                   <tfoot>
                                     <tr>
                                       <td>
@@ -2835,8 +2807,10 @@ export function App() {
                                 ) : null}
                               </table>
                             </>
+                          ) : daySalesSearch ? (
+                            <p className="report-empty">No day totals match that search.</p>
                           ) : null}
-                          {pharmacistGroups.length ? (
+                          {filteredPharmacistRows.length ? (
                             <>
                               <h4>Sales by pharmacist</h4>
                               <table className="pharmacist-report-table">
@@ -2849,25 +2823,21 @@ export function App() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {pharmacistGroups.map((group) =>
-                                    group.rows.map((row, idx) => (
-                                      <tr key={`${row.user_id}-${row.date}`}>
-                                        {idx === 0 ? (
-                                          <td rowSpan={group.rows.length} className="report-date-cell">
-                                            {formatReportDayLabel(group.date)}
-                                          </td>
-                                        ) : null}
-                                        <td>{row.pharmacist_name}</td>
-                                        <td>{row.sales_count}</td>
-                                        <td>{Number(row.gross_revenue || 0).toFixed(2)}</td>
-                                      </tr>
-                                    ))
-                                  )}
+                                  {filteredPharmacistRows.map((row) => (
+                                    <tr key={`${row.user_id}-${row.date}`}>
+                                      <td>{formatReportDayLabel(row.date)}</td>
+                                      <td>{row.pharmacist_name}</td>
+                                      <td>{row.sales_count}</td>
+                                      <td>{Number(row.gross_revenue || 0).toFixed(2)}</td>
+                                    </tr>
+                                  ))}
                                 </tbody>
                               </table>
                             </>
+                          ) : daySalesSearch ? (
+                            <p className="report-empty">No pharmacist rows match that search.</p>
                           ) : null}
-                          {dailySales.items?.length ? (
+                          {filteredMedicineRows.length ? (
                             <>
                               <h4>Medicines sold</h4>
                               <table>
@@ -2880,7 +2850,7 @@ export function App() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {dailySales.items.map((row) => (
+                                  {filteredMedicineRows.map((row) => (
                                     <tr key={row.drug_id}>
                                       <td>{row.drug_name}</td>
                                       <td>{row.quantity}</td>
@@ -2891,6 +2861,8 @@ export function App() {
                                 </tbody>
                               </table>
                             </>
+                          ) : daySalesSearch ? (
+                            <p className="report-empty">No medicines match that search.</p>
                           ) : null}
                           <div className="action-buttons report-actions">
                             <button
@@ -2926,31 +2898,6 @@ export function App() {
                 </div>
                 ) : (
                 <div className="report-panel">
-                  <h3>Receipts report</h3>
-                  <p className="sales-helper-text">
-                    Print or download receipt numbers and amounts. Date is shown once per day.
-                  </p>
-                  <label>
-                    Past receipt reports
-                    <select
-                      value={selectedReceiptsHistoryId}
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        setSelectedReceiptsHistoryId(id);
-                        applySavedReport(
-                          receiptsReportHistory.find((h) => h.id === id),
-                          "receipts"
-                        );
-                      }}
-                    >
-                      <option value="">Select a saved receipts report…</option>
-                      {receiptsReportHistory.map((h) => (
-                        <option key={h.id} value={h.id}>
-                          {h.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                   {dailySales ? (
                     <>
                       <div className="grid report-controls">
@@ -2976,8 +2923,8 @@ export function App() {
                         </label>
                       </div>
                       <p>
-                        <strong>Receipt range:</strong> {printRangeLabel} · {printReceipts.length} receipt
-                        {printReceipts.length === 1 ? "" : "s"} · KES {printReceiptTotal.toFixed(2)}
+                        <strong>Receipt range:</strong> {printRangeLabel} · {displayedReceipts.length} receipt
+                        {displayedReceipts.length === 1 ? "" : "s"} · KES {displayedReceiptTotal.toFixed(2)}
                       </p>
                       <label>
                         Search by date or receipt number
@@ -3003,20 +2950,14 @@ export function App() {
                               <tr>
                                 <td colSpan={3}>No individual receipts for this period yet. Refresh after the API is updated.</td>
                               </tr>
-                            ) : receiptGroups.length ? (
-                              receiptGroups.map((group) =>
-                                group.rows.map((row, idx) => (
-                                  <tr key={row.id || row.receipt_no}>
-                                    {idx === 0 ? (
-                                      <td rowSpan={group.rows.length} className="report-date-cell">
-                                        {formatReportDayLabel(group.date)}
-                                      </td>
-                                    ) : null}
-                                    <td>{row.receipt_no}</td>
-                                    <td>{Number(row.amount || 0).toFixed(2)}</td>
-                                  </tr>
-                                ))
-                              )
+                            ) : displayedReceipts.length ? (
+                              displayedReceipts.map((row) => (
+                                <tr key={row.id || row.receipt_no}>
+                                  <td>{formatReportDayLabel(saleDateValue(row))}</td>
+                                  <td>{row.receipt_no}</td>
+                                  <td>{Number(row.amount || 0).toFixed(2)}</td>
+                                </tr>
+                              ))
                             ) : (
                               <tr>
                                 <td colSpan={3}>No sale matches that search in the selected print range.</td>
@@ -3027,14 +2968,10 @@ export function App() {
                             <tfoot>
                               <tr>
                                 <td colSpan={2}>
-                                  <strong>{saleSearch ? "Matching total" : "Range total"}</strong>
+                                  <strong>{receiptsSearch ? "Matching total" : "Range total"}</strong>
                                 </td>
                                 <td>
-                                  <strong>
-                                    {searchedReceipts
-                                      .reduce((sum, row) => sum + Number(row.amount || 0), 0)
-                                      .toFixed(2)}
-                                  </strong>
+                                  <strong>{displayedReceiptTotal.toFixed(2)}</strong>
                                 </td>
                               </tr>
                             </tfoot>
@@ -3044,12 +2981,12 @@ export function App() {
                       <div className="action-buttons report-actions">
                         <button
                           type="button"
-                          disabled={!printReceipts.length}
+                          disabled={!displayedReceipts.length}
                           onClick={() => {
                             saveReceiptsHistoryFromCurrent();
                             printSalesReportDocument(dailySales, printRangeLabel, {
                               receiptsOnly: true,
-                              receiptsOverride: printReceipts
+                              receiptsOverride: displayedReceipts
                             });
                           }}
                         >
@@ -3057,12 +2994,12 @@ export function App() {
                         </button>
                         <button
                           type="button"
-                          disabled={!printReceipts.length}
+                          disabled={!displayedReceipts.length}
                           onClick={() => {
                             saveReceiptsHistoryFromCurrent();
                             downloadSalesReportDocument(dailySales, printRangeLabel, {
                               receiptsOnly: true,
-                              receiptsOverride: printReceipts
+                              receiptsOverride: displayedReceipts
                             });
                             setAppMessage("Receipts report downloaded.");
                           }}
