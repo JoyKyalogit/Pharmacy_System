@@ -807,6 +807,31 @@ label {
   border-top: 1px solid #e2e8f0;
 }
 
+.report-panel {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fcfdff;
+}
+
+.report-panel h3 {
+  margin-top: 0;
+}
+
+.report-panel h4 {
+  margin: 14px 0 8px;
+  font-size: 1.05rem;
+}
+
+.receipts-report-table .report-date-cell,
+.pharmacist-report-table .report-date-cell {
+  vertical-align: top;
+  font-weight: 700;
+  white-space: nowrap;
+  background: #f8fafc;
+}
+
 .receipt-panel {
   margin-top: 20px;
   padding-top: 16px;
