@@ -2898,33 +2898,57 @@ export function App() {
                 </div>
                 ) : (
                 <div className="report-panel">
+                  <div className="grid report-controls">
+                    <label>
+                      Receipts from
+                      <input
+                        type="date"
+                        value={printFromDate}
+                        max={printToDate || undefined}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setPrintFromDate(value);
+                          setSelectedDailyHistoryId("");
+                          setSelectedReceiptsHistoryId("");
+                          setSaleSearch("");
+                          if (!value) return;
+                          const end = printToDate && printToDate >= value ? printToDate : value;
+                          if (end !== printToDate) setPrintToDate(end);
+                          setReportPreset("custom");
+                          setReportStartDate(value);
+                          setReportEndDate(end);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Receipts to
+                      <input
+                        type="date"
+                        value={printToDate}
+                        min={printFromDate || undefined}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setPrintToDate(value);
+                          setSelectedDailyHistoryId("");
+                          setSelectedReceiptsHistoryId("");
+                          setSaleSearch("");
+                          if (!value) return;
+                          const start = printFromDate && printFromDate <= value ? printFromDate : value;
+                          if (start !== printFromDate) setPrintFromDate(start);
+                          setReportPreset("custom");
+                          setReportStartDate(start);
+                          setReportEndDate(value);
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {isLoadingReport && !dailySales ? <p>Loading receipts…</p> : null}
                   {dailySales ? (
                     <>
-                      <div className="grid report-controls">
-                        <label>
-                          Print receipts from
-                          <input
-                            type="date"
-                            value={printFromDate}
-                            min={dailySales?.range?.start_date || undefined}
-                            max={printToDate || dailySales?.range?.end_date || undefined}
-                            onChange={(e) => setPrintFromDate(e.target.value)}
-                          />
-                        </label>
-                        <label>
-                          Print receipts to
-                          <input
-                            type="date"
-                            value={printToDate}
-                            min={printFromDate || dailySales?.range?.start_date || undefined}
-                            max={dailySales?.range?.end_date || undefined}
-                            onChange={(e) => setPrintToDate(e.target.value)}
-                          />
-                        </label>
-                      </div>
                       <p>
                         <strong>Receipt range:</strong> {printRangeLabel} · {displayedReceipts.length} receipt
                         {displayedReceipts.length === 1 ? "" : "s"} · KES {displayedReceiptTotal.toFixed(2)}
+                        {isLoadingReport ? " · Updating…" : ""}
                       </p>
                       <label>
                         Search by date or receipt number
@@ -2948,7 +2972,7 @@ export function App() {
                           <tbody>
                             {(dailySales.receipts || []).length === 0 ? (
                               <tr>
-                                <td colSpan={3}>No individual receipts for this period yet. Refresh after the API is updated.</td>
+                                <td colSpan={3}>No receipts in this date range.</td>
                               </tr>
                             ) : displayedReceipts.length ? (
                               displayedReceipts.map((row) => (
@@ -2960,7 +2984,7 @@ export function App() {
                               ))
                             ) : (
                               <tr>
-                                <td colSpan={3}>No sale matches that search in the selected print range.</td>
+                                <td colSpan={3}>No sale matches that search in the selected range.</td>
                               </tr>
                             )}
                           </tbody>
@@ -3009,7 +3033,7 @@ export function App() {
                       </div>
                     </>
                   ) : (
-                    <p>Load a period above first, then print or download receipts here.</p>
+                    <p>Choose a from and to date to list every receipt in that range.</p>
                   )}
                 </div>
                 )}
