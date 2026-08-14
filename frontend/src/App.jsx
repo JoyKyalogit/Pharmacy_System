@@ -324,15 +324,12 @@ function receiptMatchesSearch(row, query) {
   return receiptNo.includes(q) || isoDate.includes(q) || displayDate.includes(q) || amount.includes(q);
 }
 
-function buildSalesReportPrintDocument(report, periodLabel, receiptsOverride) {
+function buildSalesReportPrintDocument(report, periodLabel, options = {}) {
+  const { receiptsOnly = false, receiptsOverride = null } = options;
   const receipts = receiptsOverride || report.receipts || [];
-  const receiptDates = new Set(receipts.map((row) => saleDateValue(row)));
-  const days = (report.daily_totals || []).filter((d) => {
-    const hasSales = Number(d.sales_count || 0) > 0 || Number(d.gross_revenue || 0) > 0;
-    if (!hasSales) return false;
-    if (receiptsOverride) return receiptDates.has(saleDateValue(d));
-    return true;
-  });
+  const days = (report.daily_totals || []).filter(
+    (d) => Number(d.sales_count || 0) > 0 || Number(d.gross_revenue || 0) > 0
+  );
   const dayRows = days
     .map(
       (row) => `
@@ -344,9 +341,7 @@ function buildSalesReportPrintDocument(report, periodLabel, receiptsOverride) {
     )
     .join("");
 
-  const pharmacistGroups = groupPharmacistRowsByDate(
-    (report.by_pharmacist || []).filter((row) => !receiptsOverride || receiptDates.has(saleDateValue(row)))
-  );
+  const pharmacistGroups = groupPharmacistRowsByDate(report.by_pharmacist || []);
   const pharmacistRows = pharmacistGroups
     .map((group) =>
       group.rows
@@ -391,11 +386,17 @@ function buildSalesReportPrintDocument(report, periodLabel, receiptsOverride) {
     )
     .join("");
 
+  const title = receiptsOnly ? "Receipts report" : "Sales report";
+  const summaryCount = receiptsOnly ? receipts.length : Number(report.sales_count || 0);
+  const summaryRevenue = receiptsOnly
+    ? receiptTotal.toFixed(2)
+    : Number(report.gross_revenue || 0).toFixed(2);
+
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Sales Report — ${escapeHtml(periodLabel)}</title>
+  <title>${escapeHtml(title)} — ${escapeHtml(periodLabel)}</title>
   <style>
     @page { size: A4; margin: 14mm; }
     body { font-family: "Segoe UI", Arial, sans-serif; color: #111; font-size: 12px; }
@@ -412,10 +413,8 @@ function buildSalesReportPrintDocument(report, periodLabel, receiptsOverride) {
 <body>
   <h1>${escapeHtml(PHARMACY_NAME)}</h1>
   <p class="meta">${escapeHtml(PHARMACY_PO_BOX)} · ${escapeHtml(PHARMACY_TELEPHONE)}</p>
-  <p class="summary"><strong>Sales report</strong> · Period: ${escapeHtml(periodLabel)}<br />
-  Transactions: ${receipts.length || Number(report.sales_count || 0)} · Revenue: KES ${
-    receipts.length ? receiptTotal.toFixed(2) : Number(report.gross_revenue || 0).toFixed(2)
-  }</p>
+  <p class="summary"><strong>${escapeHtml(title)}</strong> · Period: ${escapeHtml(periodLabel)}<br />
+  Transactions: ${summaryCount} · Revenue: KES ${summaryRevenue}</p>
   ${
     receiptRows
       ? `<h2>Receipts</h2><table><thead><tr><th>Date</th><th>Receipt number</th><th class="num">Amount (KES)</th></tr></thead><tbody>${receiptRows}</tbody>
@@ -423,17 +422,17 @@ function buildSalesReportPrintDocument(report, periodLabel, receiptsOverride) {
       : ""
   }
   ${
-    dayRows
+    !receiptsOnly && dayRows
       ? `<h2>Daily sales</h2><table><thead><tr><th>Date</th><th class="num">Transactions</th><th class="num">Revenue (KES)</th></tr></thead><tbody>${dayRows}</tbody></table>`
       : ""
   }
   ${
-    pharmacistRows
+    !receiptsOnly && pharmacistRows
       ? `<h2>Sales by pharmacist</h2><table><thead><tr><th>Date</th><th>Pharmacist</th><th class="num">Transactions</th><th class="num">Amount (KES)</th></tr></thead><tbody>${pharmacistRows}</tbody></table>`
       : ""
   }
   ${
-    itemRows
+    !receiptsOnly && itemRows
       ? `<h2>Medicines sold</h2><table><thead><tr><th>Medicine</th><th class="num">Qty</th><th class="num">Buying Price</th><th class="num">Amount (KES)</th></tr></thead><tbody>${itemRows}</tbody></table>`
       : ""
   }
@@ -441,7 +440,7 @@ function buildSalesReportPrintDocument(report, periodLabel, receiptsOverride) {
 </html>`;
 }
 
-function printSalesReportDocument(report, periodLabel, receipts) {
+function printSalesReportDocument(report, periodLabel, options = {}) {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("title", "Print sales report");
   iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
@@ -452,7 +451,7 @@ function printSalesReportDocument(report, periodLabel, receipts) {
     return;
   }
   doc.open();
-  doc.write(buildSalesReportPrintDocument(report, periodLabel, receipts));
+  doc.write(buildSalesReportPrintDocument(report, periodLabel, options));
   doc.close();
   iframe.contentWindow.focus();
   iframe.contentWindow.print();
@@ -461,8 +460,8 @@ function printSalesReportDocument(report, periodLabel, receipts) {
   }, 1000);
 }
 
-function downloadSalesReportDocument(report, periodLabel, receipts) {
-  const html = buildSalesReportPrintDocument(report, periodLabel, receipts);
+function downloadSalesReportDocument(report, periodLabel, options = {}) {
+  const html = buildSalesReportPrintDocument(report, periodLabel, options);
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -470,7 +469,7 @@ function downloadSalesReportDocument(report, periodLabel, receipts) {
     .replace(/[^\w.-]+/g, "_")
     .replace(/_+/g, "_");
   a.href = url;
-  a.download = `sales_report_${safeName}.html`;
+  a.download = `${options.receiptsOnly ? "receipts" : "sales_report"}_${safeName}.html`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -2687,50 +2686,32 @@ export function App() {
                     </select>
                   </label>
                 </div>
-                <div className="grid report-controls">
-                  <label>
-                    Print receipts from
-                    <input
-                      type="date"
-                      value={printFromDate}
-                      min={dailySales?.range?.start_date || undefined}
-                      max={printToDate || dailySales?.range?.end_date || undefined}
-                      onChange={(e) => setPrintFromDate(e.target.value)}
-                      disabled={!dailySales}
-                    />
-                  </label>
-                  <label>
-                    Print receipts to
-                    <input
-                      type="date"
-                      value={printToDate}
-                      min={printFromDate || dailySales?.range?.start_date || undefined}
-                      max={dailySales?.range?.end_date || undefined}
-                      onChange={(e) => setPrintToDate(e.target.value)}
-                      disabled={!dailySales}
-                    />
-                  </label>
-                </div>
                 <div className="action-buttons report-actions">
                   <button type="button" onClick={loadSalesSummary} disabled={isLoadingReport}>
                     {isLoadingReport ? "Loading..." : "Refresh"}
                   </button>
                   <button
                     type="button"
-                    disabled={!dailySales || !printReceipts.length}
-                    onClick={() => printSalesReportDocument(dailySales, printRangeLabel, printReceipts)}
+                    disabled={!dailySales || !hasReportData}
+                    onClick={() =>
+                      printSalesReportDocument(dailySales, reportPeriodLabel, {
+                        receiptsOverride: dailySales.receipts || []
+                      })
+                    }
                   >
-                    Print / Save as PDF
+                    Print full report / PDF
                   </button>
                   <button
                     type="button"
-                    disabled={!dailySales || !printReceipts.length}
+                    disabled={!dailySales || !hasReportData}
                     onClick={() => {
-                      downloadSalesReportDocument(dailySales, printRangeLabel, printReceipts);
-                      setAppMessage("Report downloaded. Open the file anytime, or print it to PDF from your browser.");
+                      downloadSalesReportDocument(dailySales, reportPeriodLabel, {
+                        receiptsOverride: dailySales.receipts || []
+                      });
+                      setAppMessage("Full report downloaded.");
                     }}
                   >
-                    Download report
+                    Download full report
                   </button>
                 </div>
                 {isLoadingReport && !dailySales ? <p>Loading report…</p> : null}
@@ -2747,68 +2728,6 @@ export function App() {
                       <strong>Total — Transactions:</strong> {dailySales.sales_count} ·{" "}
                       <strong>Revenue:</strong> KES {Number(dailySales.gross_revenue || 0).toFixed(2)}
                     </p>
-                    {printFromDate || printToDate ? (
-                      <p>
-                        <strong>Print range:</strong> {printRangeLabel} · {printReceipts.length} receipt
-                        {printReceipts.length === 1 ? "" : "s"} · KES {printReceiptTotal.toFixed(2)}
-                      </p>
-                    ) : null}
-
-                    {printReceipts.length ? (
-                      <>
-                        <h3>Receipts</h3>
-                        <label>
-                          Search sale by date or receipt number
-                          <input
-                            className="report-sale-search"
-                            type="search"
-                            placeholder="e.g. 00038/2026 or 14/8/2026"
-                            value={saleSearch}
-                            onChange={(e) => setSaleSearch(e.target.value)}
-                          />
-                        </label>
-                        <div className="table-scroll">
-                          <table>
-                            <thead>
-                              <tr>
-                                <th>Date</th>
-                                <th>Receipt number</th>
-                                <th>Amount (KES)</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {searchedReceipts.length ? (
-                                searchedReceipts.map((row) => (
-                                  <tr key={row.id || row.receipt_no}>
-                                    <td>{formatReportDayLabel(row.date)}</td>
-                                    <td>{row.receipt_no}</td>
-                                    <td>{Number(row.amount || 0).toFixed(2)}</td>
-                                  </tr>
-                                ))
-                              ) : (
-                                <tr>
-                                  <td colSpan={3}>No sale matches that search in the selected print range.</td>
-                                </tr>
-                              )}
-                            </tbody>
-                            <tfoot>
-                              <tr>
-                                <td colSpan={2}>
-                                  <strong>{saleSearch ? "Matching total" : "Range total"}</strong>
-                                </td>
-                                <td>
-                                  <strong>
-                                    {searchedReceipts
-                                      .reduce((sum, row) => sum + Number(row.amount || 0), 0)
-                                      .toFixed(2)}
-                                  </strong>
-                                </td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-                      </>
-                    ) : null}
 
                     {reportDaysWithSales.length ? (
                       <>
@@ -2906,6 +2825,125 @@ export function App() {
                         </table>
                       </>
                     ) : null}
+
+                    <div className="receipts-report-panel">
+                      <h3>Receipts (print separately)</h3>
+                      <p className="sales-helper-text">
+                        Search a sale, or pick a date range to print only receipts (date, receipt number, amount).
+                      </p>
+                      <div className="grid report-controls">
+                        <label>
+                          Print receipts from
+                          <input
+                            type="date"
+                            value={printFromDate}
+                            min={dailySales?.range?.start_date || undefined}
+                            max={printToDate || dailySales?.range?.end_date || undefined}
+                            onChange={(e) => setPrintFromDate(e.target.value)}
+                          />
+                        </label>
+                        <label>
+                          Print receipts to
+                          <input
+                            type="date"
+                            value={printToDate}
+                            min={printFromDate || dailySales?.range?.start_date || undefined}
+                            max={dailySales?.range?.end_date || undefined}
+                            onChange={(e) => setPrintToDate(e.target.value)}
+                          />
+                        </label>
+                      </div>
+                      <p>
+                        <strong>Receipt print range:</strong> {printRangeLabel} · {printReceipts.length} receipt
+                        {printReceipts.length === 1 ? "" : "s"} · KES {printReceiptTotal.toFixed(2)}
+                      </p>
+                      <label>
+                        Search sale by date or receipt number
+                        <input
+                          className="report-sale-search"
+                          type="search"
+                          placeholder="e.g. 00038/2026 or 14/8/2026"
+                          value={saleSearch}
+                          onChange={(e) => setSaleSearch(e.target.value)}
+                        />
+                      </label>
+                      <div className="table-scroll">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Date</th>
+                              <th>Receipt number</th>
+                              <th>Amount (KES)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(dailySales.receipts || []).length === 0 ? (
+                              <tr>
+                                <td colSpan={3}>
+                                  No individual receipts in this period yet. Refresh after the API update, or use the full
+                                  report above.
+                                </td>
+                              </tr>
+                            ) : searchedReceipts.length ? (
+                              searchedReceipts.map((row) => (
+                                <tr key={row.id || row.receipt_no}>
+                                  <td>{formatReportDayLabel(row.date)}</td>
+                                  <td>{row.receipt_no}</td>
+                                  <td>{Number(row.amount || 0).toFixed(2)}</td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td colSpan={3}>No sale matches that search in the selected print range.</td>
+                              </tr>
+                            )}
+                          </tbody>
+                          {(dailySales.receipts || []).length > 0 ? (
+                            <tfoot>
+                              <tr>
+                                <td colSpan={2}>
+                                  <strong>{saleSearch ? "Matching total" : "Range total"}</strong>
+                                </td>
+                                <td>
+                                  <strong>
+                                    {searchedReceipts
+                                      .reduce((sum, row) => sum + Number(row.amount || 0), 0)
+                                      .toFixed(2)}
+                                  </strong>
+                                </td>
+                              </tr>
+                            </tfoot>
+                          ) : null}
+                        </table>
+                      </div>
+                      <div className="action-buttons report-actions">
+                        <button
+                          type="button"
+                          disabled={!printReceipts.length}
+                          onClick={() =>
+                            printSalesReportDocument(dailySales, printRangeLabel, {
+                              receiptsOnly: true,
+                              receiptsOverride: printReceipts
+                            })
+                          }
+                        >
+                          Print receipts / PDF
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!printReceipts.length}
+                          onClick={() => {
+                            downloadSalesReportDocument(dailySales, printRangeLabel, {
+                              receiptsOnly: true,
+                              receiptsOverride: printReceipts
+                            });
+                            setAppMessage("Receipts report downloaded.");
+                          }}
+                        >
+                          Download receipts
+                        </button>
+                      </div>
+                    </div>
                       </>
                     )}
                   </div>

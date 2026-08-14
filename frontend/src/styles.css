@@ -801,6 +801,12 @@ label {
   max-width: 360px;
 }
 
+.receipts-report-panel {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
 .receipt-panel {
   margin-top: 20px;
   padding-top: 16px;
